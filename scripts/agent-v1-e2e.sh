@@ -243,7 +243,8 @@ if [ "$(curl -s -b "$CJ" "$BASE/rest/private/agent/v1/rollout/active" | field "d
   chk "observer: rollout promote denied" "$(curl -s -b "$OJ" -X POST "$BASE/rest/private/agent/v1/rollout/$LIVE_RID/promote" | ores)" "$DENIED"
   chk "observer: rollout cancel denied" "$(curl -s -b "$OJ" -X POST "$BASE/rest/private/agent/v1/rollout/$LIVE_RID/cancel" | ores)" "$DENIED"
   chk "observer: rollout still active, still canary" "$(curl -s -b "$OJ" "$BASE/rest/private/agent/v1/rollout/active" | field "str((d.get('data') or {}).get('id'))+':'+str((d.get('data') or {}).get('stage'))")" "$LIVE_RID:canary"
-  CANCELLED=$(curl -s -b "$CJ" -X POST "$BASE/rest/private/agent/v1/rollout/$LIVE_RID/cancel" | field "d['status']")
+  # `|| true`: a transport error or a non-JSON body must end in the FAIL below (and a retry on exit), not an abort.
+  CANCELLED=$(curl -s -b "$CJ" -X POST "$BASE/rest/private/agent/v1/rollout/$LIVE_RID/cancel" | field "d['status']" || true)
   chk "admin: rollout cancel OK" "$CANCELLED" "OK"
   if [ "$CANCELLED" = OK ]; then LIVE_RID=""; fi
   chk "no active rollout left" "$(curl -s -b "$CJ" "$BASE/rest/private/agent/v1/rollout/active" | field "d['data'] is None")" "True"
@@ -253,7 +254,7 @@ fi
 chk "observer: command history readable" "$(curl -s -b "$OJ" "$BASE/rest/private/agent/v1/devices/$DID/commands?since=0" | field "d['status']")" "OK"
 chk "observer: device state readable" "$(curl -s -b "$OJ" "$BASE/rest/private/agent/v1/devices/$DID/state" | field "str(d['status'])+':'+str(d['data']['battery'])")" "OK:77"
 chk "observer: active rollout readable" "$(curl -s -b "$OJ" "$BASE/rest/private/agent/v1/rollout/active" | field "d['status']")" "OK"
-DELETED=$(curl -s -b "$CJ" -X DELETE "$BASE/rest/private/users/other/$OID" | field "d['status']")
+DELETED=$(curl -s -b "$CJ" -X DELETE "$BASE/rest/private/users/other/$OID" | field "d['status']" || true)  # as CANCELLED
 chk "observer user deleted" "$DELETED" "OK"
 if [ "$DELETED" = OK ]; then LIVE_OID=""; LIVE_OLOGIN=""; fi
 
