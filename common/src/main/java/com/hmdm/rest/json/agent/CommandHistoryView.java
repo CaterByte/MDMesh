@@ -11,8 +11,9 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * One row of a device's command history as the console sees it. Deliberately has NO payload: payloads of
- * {@code config.apply} / {@code kiosk.enter} embed the configuration admin password hash, and the history is
+ * One row of a device's command history as the console sees it. Deliberately has NO payload: payloads carry secrets
+ * ({@code device.passcodeReset} the new device passcode and a console-queued {@code kiosk.enter} the kiosk exit
+ * password, both in plain text; {@code config.apply} the configuration admin password hash), and the history is
  * readable by every user of the customer. {@link #subject} is a safe, server-derived label instead.
  */
 @Getter

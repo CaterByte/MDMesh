@@ -96,6 +96,10 @@ curl -fsSL "${RAW}/install/sql/post_seed.sql"    -o install/sql/post_seed.sql
 mkdir -p install/lib
 curl -fsSL "${RAW}/install/lib/db.sh"             -o install/lib/db.sh
 # Shared seed rules with setup.sh / the native installer (seed gate, verified seed, post-seed repairs).
+# Version coupling: this script runs from main, but db.sh (like the compose file and the seed) comes from the release
+# tag being installed, so it matches the images. Call only db.sh functions, with only the arguments and output, that
+# the latest published release already has; a db.sh change becomes usable here once a release ships it.
+# (install/lib/db.sh states the same rule for its side.)
 # shellcheck source=install/lib/db.sh
 . ./install/lib/db.sh
 

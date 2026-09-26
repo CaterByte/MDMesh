@@ -13,6 +13,10 @@
 # admin user, so fresh installs were never seeded (default admin password, no enrollment
 # defaults). quickstart.sh never ran the post-seed repairs, so enrollment was off. Keep the
 # rules in one place.
+#
+# Compatibility rule: quickstart.sh is fetched from main but downloads THIS file from the latest
+# release tag. Never rename a function or change its arguments or output; a new function may be
+# called from quickstart.sh only after a release that ships it.
 
 # Password format the server expects: users.password = SHA1( UPPER(MD5(raw)) + SALT ).
 # SALT must match PasswordUtil.PASS_SALT in the server.
