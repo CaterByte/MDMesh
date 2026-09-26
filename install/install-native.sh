@@ -235,9 +235,10 @@ if jwt_key_ok "$_old_jwt"; then JWT_SECRET="$_old_jwt"; info "Reusing jwt.secret
 elif [ -n "$_old_jwt" ]; then info "Replacing the existing jwt.secretkey: it is not hex, a multiple of 4 and at least 128 characters (the JWT library would drop characters)"; fi
 
 step "Installing dependencies"
-# HERMETIC BUILD: pin JDK 17 and never fall back to the host default JDK. The server uses Lombok 1.18.20,
-# whose annotation processor only runs on JDK <=17; on a newer default JDK (21/25/…) it generates nothing
-# and the build dies with hundreds of "cannot find symbol". This keeps the build identical on any host.
+# HERMETIC BUILD: pin JDK 17 and never fall back to the host default JDK. JDK 17 is the one supported server
+# JDK (CI, the Docker build + tomcat:9.0-jdk17 runtime, and this Tomcat all use it), so a host whose default is
+# 21/25/… still builds and runs exactly what CI tested. (JDK 23+ would also need annotation processing enabled
+# explicitly for Lombok.)
 select_jdk17() {
   local c
   for c in "${JAVA17_HOME:-}" \
@@ -275,7 +276,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y minisign >> "$LOGFILE" 2>&1 ||
 step "Selecting the Java 17 toolchain"
 JAVA_HOME=$(select_jdk17) || {
   _spin_stop
-  echo "  ${c_red}✗ no JDK 17 found${c_reset} — the server build REQUIRES JDK 17 (Lombok 1.18.20 breaks on JDK 21+)." >&2
+  echo "  ${c_red}✗ no JDK 17 found${c_reset} — the server is built and run on JDK 17 (the supported server JDK)." >&2
   echo "    Install it (apt-get install -y openjdk-17-jdk) or set JAVA17_HOME to a JDK 17 home, then re-run." >&2
   exit 1
 }
