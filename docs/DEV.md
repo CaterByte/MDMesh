@@ -108,13 +108,13 @@ It signs in as `admin` with `ADMIN_PW` (default `admin`, what `dev-seed.sh` sets
 `DEV_ADMIN_PASSWORD`, pass the same value as `ADMIN_PW`. For another server, seed it the way `scripts/dev-seed.sh`
 does and pass `ADMIN_PW=<password>`.
 
-CI runs the same loop as tier T1 (`.github/workflows/t1-e2e.yml`): the dev stack's `postgres` and `server`
-services, `scripts/dev-seed.sh` with a random admin password, then `scripts/agent-v1-e2e.sh`. Each run gets its own
-compose project, server image tag and ephemeral loopback ports, so it never collides with your dev stack or another
-run. It runs on pull requests and pushes to `main` that touch the server modules, `proto/`, `install/`, the server
-image, the dev stack files or the suite (the `e2e` filter in the workflow has the exact list), and on any change under
-`.github/`, to a Dockerfile, a compose file or a lockfile. A failed run uploads the compose and Tomcat logs as the
-`t1-e2e-logs` artifact.
+CI runs the same loop as tier T1 (`.github/workflows/t1-e2e.yml`): the dev stack's `postgres` and `server` services,
+`scripts/dev-seed.sh` with a random admin password, then `scripts/agent-v1-e2e.sh`. Each run gets its own compose
+project, server image tag and ephemeral loopback ports, so it never collides with your dev stack or another run. It
+runs on pull requests and pushes to `main` that touch the server modules, `proto/`, `install/`, the server image,
+the dev stack files or the suite (the `e2e` filter in the workflow has the exact list), and on any change under
+`.github/`, to a compose file, a lockfile or a file named `Dockerfile*`. A failed run uploads the compose and Tomcat
+logs as the `t1-e2e-logs` artifact.
 
 The remaining step that needs a provisioned box is the **real on-device run**: build the agent, enroll an AOSP
 emulator as Device Owner via ADB, and watch a `policy.apply` apply on the device.
