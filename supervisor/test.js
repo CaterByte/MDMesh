@@ -95,3 +95,69 @@ t.test('recovery.html escapes status strings before they reach innerHTML', () =>
     a.ok(!html.includes(raw), 'unescaped interpolation left in recovery.html: ' + raw);
   }
 });
+
+// --- Process-level: the real server.js against a local fake GitHub (no network). Skipped without minisign; the
+// supervisor image (where CI runs this file) ships it. ---
+const cp = require('child_process');
+const HAS_MINISIGN = cp.spawnSync('minisign', ['-v']).status === 0;
+
+t.test('/update/status reports the mirrored APK as available once the warm-up download lands, without re-polling',
+  { skip: !HAS_MINISIGN && 'minisign not installed', timeout: 20000 }, async (tt) => {
+    const fs = require('fs'), os = require('os'), path = require('path'), http = require('http'), crypto = require('crypto');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sup-apk-'));
+    tt.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    // A signed release: throwaway key pair, a manifest naming the APK by sha256, the detached signature beside it.
+    const apk = crypto.randomBytes(4096);
+    const manifest = { version: '9.9.9', channel: 'stable', components: { apk: {
+      file: 'mdmesh-agent.apk', versionCode: 999, sha256: crypto.createHash('sha256').update(apk).digest('hex') } } };
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest));
+    cp.execFileSync('minisign', ['-G', '-W', '-p', path.join(dir, 'k.pub'), '-s', path.join(dir, 'k.key')], { stdio: 'ignore' });
+    cp.execFileSync('minisign', ['-S', '-s', path.join(dir, 'k.key'), '-m', path.join(dir, 'manifest.json')], { stdio: 'ignore' });
+
+    // Fake GitHub: the releases API (counted) and the three release assets.
+    let releaseCalls = 0;
+    const gh = http.createServer((req, res) => {
+      const base = `http://127.0.0.1:${gh.address().port}`;
+      if (req.url.startsWith('/repos/o/r/releases')) {
+        releaseCalls++;
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify([{ tag_name: 'v9.9.9', html_url: base + '/rel', assets: ['manifest.json', 'manifest.json.minisig', 'mdmesh-agent.apk']
+          .map((name) => ({ name, browser_download_url: `${base}/dl/${name}` })) }]));
+      } else if (req.url === '/dl/mdmesh-agent.apk') res.end(apk);
+      else if (req.url === '/dl/manifest.json' || req.url === '/dl/manifest.json.minisig') res.end(fs.readFileSync(path.join(dir, req.url.slice(4))));
+      else { res.statusCode = 404; res.end(); }
+    });
+    await new Promise((r) => gh.listen(0, '127.0.0.1', r));
+    tt.after(() => gh.close());
+
+    // server.js calls the fixed https://api.github.com origin; a preload points only that origin at the fake.
+    const preload = path.join(dir, 'fake-github.js');
+    fs.writeFileSync(preload, "const f = globalThis.fetch;\n"
+      + "globalThis.fetch = (u, o) => f(String(u).replace('https://api.github.com', process.env.FAKE_GITHUB), o);\n");
+    const port = await new Promise((r) => { const s = http.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
+    const child = cp.spawn(process.execPath, ['--require', preload, path.join(__dirname, 'server.js')], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, FAKE_GITHUB: `http://127.0.0.1:${gh.address().port}`, GITHUB_REPO: 'o/r', GITHUB_TOKEN: '',
+        SUPERVISOR_PORT: String(port), SUPERVISOR_BIND: '127.0.0.1', CURRENT_VERSION: '9.9.9', APPLY_SUPPORTED: '0', AUTO_UPDATE: '0',
+        MANIFEST_PUBKEY: path.join(dir, 'k.pub'), APK_CACHE_DIR: path.join(dir, 'apk'), PUBLISH_APK_TO: '',
+        AUTO_FILE: path.join(dir, 'auto.json'), RECOVERY_TOKEN_FILE: path.join(dir, 'recovery.token') } });
+    tt.after(() => child.kill());
+
+    // Wait for the startup poll's warm-up download to land. server.js logs "[apk] mirrored" in the same synchronous
+    // block that publishes the file, so any request answered after this line sees the post-download state.
+    let log = '';
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('APK never mirrored; supervisor output:\n' + log)), 10000);
+      const onData = (d) => { log += d; if (log.includes('[apk] mirrored')) { clearTimeout(timer); resolve(); } };
+      child.stdout.on('data', onData);
+      child.stderr.on('data', onData);
+      child.on('exit', (code) => { clearTimeout(timer); reject(new Error(`supervisor exited (${code}):\n${log}`)); });
+    });
+
+    const status = await (await fetch(`http://127.0.0.1:${port}/update/status`)).json();
+    a.equal(status.verified, true, 'the fake release verifies against the throwaway key');
+    a.deepEqual({ versionCode: status.apk && status.apk.versionCode, available: status.apk && status.apk.available },
+      { versionCode: 999, available: true }, '/update/status must say available once the APK is being served');
+    a.equal(releaseCalls, 1, 'the refresh comes from the download itself, not from another poll');
+  });

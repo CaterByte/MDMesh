@@ -103,6 +103,7 @@ async function ensureApk() {
       fs.renameSync(tmp, dest); // atomic publish only after verification
       console.log('[apk] mirrored', dest);
       publishApk(dest);
+      refreshApkAvailable();
       return true;
     } catch (e) {
       console.log('[apk] error', String((e && e.message) || e));
@@ -111,6 +112,12 @@ async function ensureApk() {
     } finally { apkFetching = null; }
   })();
   return apkFetching;
+}
+
+/** Re-derive `available` once a download lands: setStatus() snapshots apkReady() before poll()'s warm-up download
+ *  finishes, and nothing else rebuilds `state` until the next poll (POLL_INTERVAL_HOURS). */
+function refreshApkAvailable() {
+  if (state.apk) state.apk = { ...state.apk, available: apkReady() };
 }
 
 /** Copy a freshly-verified APK over the deployment's static hosting path (native installs). */
