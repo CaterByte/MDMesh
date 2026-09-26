@@ -101,6 +101,30 @@ enforced by a golden contract test in CI — see [ADR-0009](docs/adr/0009-agent-
 
 ---
 
+## Dependency updates
+
+Dependabot opens one grouped PR per plane every Monday ([`.github/dependabot.yml`](.github/dependabot.yml)).
+
+- **T0 green is necessary, not sufficient.** T0 compiles and runs the DB-free tests only. Before merging a group
+  that moves a runtime library across a minor/major, run that plane's runtime check too: web —
+  `cd web && npm run build && cd ../scripts/shots && npm install && node capture.mjs --check`; server — boot the
+  WAR against Postgres and run `scripts/agent-v1-e2e.sh`; agent — install the APK on a device/emulator and
+  complete a check-in.
+- **Known-bad lines are ignored, with a reason.** Each `ignore` in `dependabot.yml` names the migration that lifts
+  it (javax → jakarta / Tomcat 10+, jjwt API port, AGP 9, …). Remove the ignore in that migration's PR — never
+  merge a Dependabot PR that crosses one piecemeal. The `agent-toolchain` group is expected to stay red until the
+  AGP 9 migration.
+- **Licenses:** a bump that changes a dependency's license (e.g. Liquibase 5 → FSL) is blocked until reviewed
+  against [ADR-0008](docs/adr/0008-licensing-and-rebrand.md).
+- **One JDK, one Node line.** The server builds and runs on **JDK 17** (CI, Docker build + `tomcat:9.0-jdk17`
+  runtime, native installer). Node follows the current **LTS** line — **24** (the images still run 20/22 until
+  they move) — in `web/package.json` `engines`, both `docker/*.Dockerfile` `FROM node:` lines and `@types/node`;
+  move all of them in one PR once the next even line has been LTS for a few months. Docker base images use
+  floating tags, so rebuilds pick up patches; a tag change is a deliberate PR.
+- **Vendored CI actions** (`.github/actions/ci-kit/`) change only by re-running ci-kit's `scripts/vendor.sh`.
+
+---
+
 ## What makes a PR easy to merge
 
 - It's small and does one thing.
