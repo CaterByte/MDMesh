@@ -89,6 +89,15 @@ production installer (it writes a `.env` for a real host); see **[DEPLOY.md](DEP
 4. **Update docs** when you change behavior, config, or the API.
 5. **Open a PR** against `main` using the [PR template](.github/pull_request_template.md).
 
+### CI
+Every PR and every push to `main` runs two tiers; each skips the parts your change can't affect.
+- **T0** (`.github/workflows/t0-fast.yml`): builds each plane you touched and runs its DB-free tests, plus the
+  supervisor image smoke test and the edge (Caddy + compose) check.
+- **T1** (`.github/workflows/t1-e2e.yml`): the Agent v1 end-to-end suite against a real server and Postgres. It
+  runs the loop from [docs/DEV.md](docs/DEV.md) (the dev stack, `scripts/dev-seed.sh`, `scripts/agent-v1-e2e.sh`)
+  on its own compose project, image tag and ephemeral ports. It runs when a change touches the server, `proto/`,
+  `install/`, the server image, the dev stack or the suite. A red T1 on `main` opens a tracking issue.
+
 ### Commit messages
 Short, imperative, prefixed: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`. Explain the
 *why* in the body when it isn't obvious.
@@ -109,9 +118,9 @@ deps (`agent-toolchain`, `agent-libs`).
 
 - **T0 green is necessary, not sufficient.** T0 compiles and runs the DB-free tests only. Before merging a group
   that moves a runtime library across a minor/major, run that plane's runtime check too: web —
-  `cd web && npm run build && cd ../scripts/shots && npm install && node capture.mjs --check`; server — boot the
-  WAR against Postgres and run `scripts/agent-v1-e2e.sh`; agent — install the APK on a device/emulator and
-  complete a check-in.
+  `cd web && npm run build && cd ../scripts/shots && npm install && node capture.mjs --check`; server — the
+  `t1-e2e` workflow (`agent-e2e` job) must be green on the PR (it builds the server image and runs the suite);
+  agent — install the APK on a device/emulator and complete a check-in.
 - **Known-bad lines are ignored, with a reason.** Each `ignore` in `dependabot.yml` names the migration that lifts
   it (javax → jakarta / Tomcat 10+, jjwt API port, AGP 9, Postgres major, …). Remove the ignore in that
   migration's PR — never merge a Dependabot PR that crosses one piecemeal. The `agent-toolchain` group is expected
