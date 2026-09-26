@@ -19,13 +19,20 @@ BASE="${1:-${BASE_URL:-http://localhost:8080}}"
 CJ="$(mktemp)"; OJ=""
 # Fixtures a later section creates register themselves here, so an abort (set -e) never leaves them behind. A fixture
 # is unregistered only once its teardown check passed; if that check failed, cleanup() tries the teardown again.
-LIVE_RID=""; LIVE_OID=""; LIVE_OLOGIN=""
+LIVE_RID=""; LIVE_RVER=""; LIVE_OID=""; LIVE_OLOGIN=""
 # Id of the user with exactly this login, or nothing. Prints nothing (never a traceback) on a bad response because
 # cleanup() uses it too; the main flow checks for an empty result itself.
 uid_of(){ curl -s -b "$CJ" "$BASE/rest/private/users/all?filter=$1" | python3 -c "import sys,json
 try: print(next((u['id'] for u in json.load(sys.stdin)['data'] if u['login']==sys.argv[1]), ''))
 except Exception: pass" "$1"; }
+# Id of the active rollout if its targetVersion is exactly this one (i.e. this run created it), or nothing; never
+# fails, like uid_of. A rollout another client created is never matched, so cleanup() never cancels it.
+rid_of(){ curl -s -b "$CJ" "$BASE/rest/private/agent/v1/rollout/active" | python3 -c "import sys,json
+try: d=json.load(sys.stdin)['data'] or {}; print(d['id'] if d.get('targetVersion')==sys.argv[1] else '')
+except Exception: pass" "$1"; }
 cleanup(){
+  # A rollout exists before its id is known: if the create's response was lost, find it again by its targetVersion.
+  [ -n "$LIVE_RID" ] || [ -z "$LIVE_RVER" ] || LIVE_RID=$(rid_of "$LIVE_RVER" || true)
   [ -z "$LIVE_RID" ] || curl -s -b "$CJ" -X POST "$BASE/rest/private/agent/v1/rollout/$LIVE_RID/cancel" >/dev/null || true
   # The Observer exists before its id is known: if the id lookup itself aborted, find the user again by its login.
   [ -n "$LIVE_OID" ] || [ -z "$LIVE_OLOGIN" ] || LIVE_OID=$(uid_of "$LIVE_OLOGIN" || true)
@@ -224,21 +231,31 @@ chk "observer: mint enrollment token denied" "$(curl -s -b "$OJ" -X POST -H 'Con
   -d '{}' "$BASE/rest/private/agent/v1/token" | ores)" "$DENIED"
 chk "observer: syncApps denied" "$(curl -s -b "$OJ" -X POST "$BASE/rest/private/agent/v1/devices/$DID/syncApps" | ores)" "$DENIED"
 chk "observer: force sync denied" "$(curl -s -b "$OJ" -X POST "$BASE/rest/private/agent/v1/devices/$DID/sync" | ores)" "$DENIED"
+# Registered before the create call: unless the create is clearly denied, cleanup() cancels a 9.9.9-e2e rollout.
+LIVE_RVER="9.9.9-e2e"
 ROUT=$(curl -s -b "$OJ" -X POST -H 'Content-Type: application/json' \
   -d "{\"targetVersion\":\"9.9.9-e2e\",\"packageName\":\"com.mdmesh.agent\",\"apkVersionCode\":999999,\"apkSha256\":\"$(printf '0%.0s' $(seq 64))\",\"canaryDeviceNumbers\":[\"$DID\"]}" \
-  "$BASE/rest/private/agent/v1/rollout")
-chk "observer: rollout create denied" "$(echo "$ROUT" | ores)" "$DENIED"
+  "$BASE/rest/private/agent/v1/rollout" || true)
+OCREATE=$(echo "$ROUT" | ores || true)
+chk "observer: rollout create denied" "$OCREATE" "$DENIED"
+if [ "$OCREATE" = "$DENIED" ]; then LIVE_RVER=""; fi
 # Should the create ever get through (regression), do not leave an active rollout behind.
-RID=$(echo "$ROUT" | field "(d.get('data') or {}).get('id') or ''")
-[ -z "$RID" ] || curl -s -b "$CJ" -X POST "$BASE/rest/private/agent/v1/rollout/$RID/cancel" >/dev/null
+RID=$(echo "$ROUT" | field "(d.get('data') or {}).get('id') or ''" || true)
+if [ -n "$RID" ]; then
+  LIVE_RID="$RID"
+  RCANCELLED=$(curl -s -b "$CJ" -X POST "$BASE/rest/private/agent/v1/rollout/$RID/cancel" | field "d['status']" || true)
+  chk "observer-created rollout cancelled" "$RCANCELLED" "OK"
+  if [ "$RCANCELLED" = OK ]; then LIVE_RID=""; LIVE_RVER=""; fi
+fi
 # A REAL rollout (admin-created) — the Observer may read it but neither promote nor cancel it. The canary is the
 # e2e device, which advertises no app.silentInstall, so nothing is queued. Skipped rather than touching a live
 # rollout if the server already has one (one active rollout per customer).
 if [ "$(curl -s -b "$CJ" "$BASE/rest/private/agent/v1/rollout/active" | field "d['data'] is None")" = True ]; then
+  LIVE_RVER="9.9.8-e2e"   # before the create call: if its response is lost, cleanup() still finds the rollout
   AROUT=$(curl -s -b "$CJ" -X POST -H 'Content-Type: application/json' \
     -d "{\"targetVersion\":\"9.9.8-e2e\",\"packageName\":\"com.mdmesh.agent\",\"apkVersionCode\":999998,\"apkSha256\":\"$(printf '0%.0s' $(seq 64))\",\"canaryDeviceNumbers\":[\"$DID\"]}" \
-    "$BASE/rest/private/agent/v1/rollout")
-  LIVE_RID=$(echo "$AROUT" | field "(d.get('data') or {}).get('id') or ''")
+    "$BASE/rest/private/agent/v1/rollout" || true)
+  LIVE_RID=$(echo "$AROUT" | field "(d.get('data') or {}).get('id') or ''" || true)
   chk "admin: rollout created (canary)" "$(echo "$AROUT" | field "str(d['status'])+':'+str((d.get('data') or {}).get('stage'))")" "OK:canary"
   chk "observer: rollout promote denied" "$(curl -s -b "$OJ" -X POST "$BASE/rest/private/agent/v1/rollout/$LIVE_RID/promote" | ores)" "$DENIED"
   chk "observer: rollout cancel denied" "$(curl -s -b "$OJ" -X POST "$BASE/rest/private/agent/v1/rollout/$LIVE_RID/cancel" | ores)" "$DENIED"
@@ -246,7 +263,7 @@ if [ "$(curl -s -b "$CJ" "$BASE/rest/private/agent/v1/rollout/active" | field "d
   # `|| true`: a transport error or a non-JSON body must end in the FAIL below (and a retry on exit), not an abort.
   CANCELLED=$(curl -s -b "$CJ" -X POST "$BASE/rest/private/agent/v1/rollout/$LIVE_RID/cancel" | field "d['status']" || true)
   chk "admin: rollout cancel OK" "$CANCELLED" "OK"
-  if [ "$CANCELLED" = OK ]; then LIVE_RID=""; fi
+  if [ "$CANCELLED" = OK ]; then LIVE_RID=""; LIVE_RVER=""; fi
   chk "no active rollout left" "$(curl -s -b "$CJ" "$BASE/rest/private/agent/v1/rollout/active" | field "d['data'] is None")" "True"
 else
   echo "  SKIP: observer promote/cancel on a real rollout (this server already has an active rollout)"
