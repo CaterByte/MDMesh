@@ -61,12 +61,19 @@ for svc in postgres server; do
 done
 API="http://$("${DC[@]}" port server 8080)"   # the published host port, wherever DEV_API_PORT put it
 
-# initialized.txt lives on the server's data volume and survives restarts, so also wait for the API to answer.
-ready() { "${DC[@]}" exec -T server test -f /opt/mdmesh/initialized.txt 2>/dev/null \
-          && curl -fsS -o /dev/null -m 5 "$API/rest/public/auth/options"; }
-echo "dev stack $project: waiting for the server (the first boot runs Liquibase)..."
-for _ in $(seq 1 60); do ready && break; sleep 5; done
-ready || { echo "server not ready after 5 min; see: docker compose --env-file docker/dev.env logs server" >&2; exit 1; }
+# initialized.txt lives on the server's data volume and survives restarts, so also wait for the API to answer. Both
+# probes are silent: while Tomcat boots, refused or reset connections are expected, not errors worth printing.
+ready() { "${DC[@]}" exec -T server test -f /opt/mdmesh/initialized.txt >/dev/null 2>&1 \
+          && curl -fs -o /dev/null -m 5 "$API/rest/public/auth/options" 2>/dev/null; }
+printf 'dev stack %s: waiting for the server (the first boot runs Liquibase)' "$project"
+up=
+for _ in $(seq 1 60); do ready && { up=1; break; }; printf '.'; sleep 5; done
+if [ -n "$up" ]; then echo " ready"; else
+  echo " timed out"
+  echo "the server did not answer $API/rest/public/auth/options within 5 minutes;" \
+       "see its log: docker compose --env-file docker/dev.env logs server" >&2
+  exit 1
+fi
 
 state=$(mdm_db_state)
 case "$state" in
