@@ -12,9 +12,9 @@ import java.util.List;
 
 /**
  * One row of a device's command history as the console sees it. Deliberately has NO payload: payloads carry secrets
- * ({@code device.passcodeReset} the new device passcode and a console-queued {@code kiosk.enter} the kiosk exit
- * password, both in plain text; {@code config.apply} the configuration admin password hash), and the history is
- * readable by every user of the customer. {@link #subject} is a safe, server-derived label instead.
+ * in plain text ({@code device.passcodeReset} the new device passcode; {@code config.apply} and {@code kiosk.enter}
+ * the kiosk exit password as entered), and the history is readable by every user of the customer.
+ * {@link #subject} is a safe, server-derived label instead.
  */
 @Getter
 @Setter
