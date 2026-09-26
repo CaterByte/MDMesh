@@ -5,8 +5,9 @@
 #      FROM (read from docker/web.Dockerfile, so CI and production cannot disagree). validate, not adapt: adapt
 #      accepts values (e.g. a bad TRUSTED_PROXIES) that only fail when the config is provisioned.
 #   2. `docker compose config -q` for every compose file / overlay / profile combination the installers use.
-#   3. /healthz and /healthz/supervisor, served by that caddy against stub upstreams: 503 while the upstream is down
-#      or failing (not the SPA's or the recovery page's catch-all 200), 200 "ok" once it answers.
+#   3. /healthz and /healthz/supervisor (with or without a trailing slash), served by that caddy against stub upstreams:
+#      503 + reason while the upstream is down or failing (not the SPA's or the recovery page's catch-all 200), 200 "ok"
+#      once it answers.
 # Guards the v0.3.1 Cloudflare-mode break: `email {$ACME_EMAIL}` with the empty ACME_EMAIL that setup.sh and
 # quickstart.sh write made the edge refuse to start, and nothing in CI parsed the Caddyfile.
 # Needs only a Docker daemon (+ compose plugin). Throwaway --rm containers, no network, no ports.
@@ -79,15 +80,23 @@ for combo in "${COMBOS[@]}"; do
   fi
 done
 
-# --- 3. Health routes, run under the same caddy image. /healthz and /healthz/supervisor must answer 503 (never the SPA's
-# or the recovery page's catch-all 200) when their upstream is down or failing, and 200 "ok" when it answers.
+# --- 3. Health routes, run under the same caddy image. /healthz and /healthz/supervisor, with or without a trailing
+# slash, must answer 503 + reason (never the SPA's or the recovery page's catch-all 200) when their upstream is down or
+# failing, and 200 "ok" when it answers.
 # Hermetic like the rest: one --rm container, --network none, with `server` and `supervisor` pinned to loopback where
-# throwaway caddy stubs (admin off) stand in for them. Output uses the ok/FAIL format above.
+# throwaway caddy stubs (admin off) stand in for them. Output uses the ok/FAIL format above. curl, not the image's
+# busybox wget: wget discards the body of a non-2xx response, and the 503 reasons are part of the contract.
 HEALTH_PROBE="$(cat <<'PROBE'
 set -u
 F=0
-mkdir -p /srv /tmp/stub && echo '<!doctype html><title>spa</title>' > /srv/index.html
-http_code() { wget -S -T 5 -O "${2:-/dev/null}" "$1" 2>&1 | grep -o 'HTTP/[0-9.]* [0-9][0-9][0-9]' | tail -1 | cut -d' ' -f2; }
+SPA='<!doctype html><title>spa</title>'
+DOWN='server unavailable'
+SUP_DOWN='supervisor unavailable'
+command -v curl >/dev/null || { echo "  FAIL no curl in the caddy image (the probe reads 503 bodies with it)"; exit 1; }
+mkdir -p /srv /tmp/stub && echo "$SPA" > /srv/index.html
+http_code() { # http_code <url> [body file]: the status code, or nothing when there is no response (curl's 000)
+  c="$(curl -s -m 5 -o "${2:-/dev/null}" -w '%{http_code}' "$1" || true)"; [ "$c" = 000 ] || printf '%s' "$c"
+}
 stub() {   # stub <port> <site body>: start a throwaway upstream on :<port> and wait until it answers
   printf '{\n\tadmin off\n}\n:%s {\n%s\n}\n' "$1" "$2" > "/tmp/stub/$1"
   caddy run --config "/tmp/stub/$1" --adapter caddyfile >/dev/null 2>&1 &
@@ -103,21 +112,30 @@ expect() { # expect <label> <path> <status> [body]
   else echo "  FAIL $1 (expected $3${4:+ $4}, got ${code:-no response}${body:+: $(printf '%.40s' "$body")})"; F=$((F + 1)); fi
 }
 caddy start --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || { echo "  FAIL edge did not start"; exit 1; }
-expect "/healthz: 503 while the server is down"                    /healthz            503
-expect "/healthz/supervisor: 503 while the supervisor is down"     /healthz/supervisor 503
-expect "/: still the SPA"                                           /                   200 '<!doctype html><title>spa</title>'
+expect "/healthz: 503 while the server is down"                    /healthz             503 "$DOWN"
+expect "/healthz/: 503 while the server is down"                   /healthz/            503 "$DOWN"
+expect "/healthz/supervisor: 503 while the supervisor is down"     /healthz/supervisor  503 "$SUP_DOWN"
+expect "/healthz/supervisor/: 503 while the supervisor is down"    /healthz/supervisor/ 503 "$SUP_DOWN"
+expect "/: still the SPA"                                           /                    200 "$SPA"
+expect "/healthz/x: still the SPA (health paths match exactly)"     /healthz/x           200 "$SPA"
 stub 9000 '	respond /healthz "ok" 200
-	respond /healthz/supervisor "not rewritten" 404
+	respond /healthz/supervisor* "not rewritten" 404
 	respond "recovery page" 200'
-expect "/healthz: 503 while the server is down, not the recovery page's 200" /healthz 503
-expect "/healthz/supervisor: 200 ok once the supervisor answers"   /healthz/supervisor 200 ok
-expect "/rest/*: server down still falls back to the recovery page" /rest/public/name  200 'recovery page'
+expect "/healthz: 503 while the server is down, not the recovery page's 200"  /healthz  503 "$DOWN"
+expect "/healthz/: 503 while the server is down, not the recovery page's 200" /healthz/ 503 "$DOWN"
+expect "/healthz/supervisor: 200 ok once the supervisor answers"   /healthz/supervisor  200 ok
+expect "/healthz/supervisor/: 200 ok once the supervisor answers"  /healthz/supervisor/ 200 ok
+expect "/rest/*: server down still falls back to the recovery page" /rest/public/name   200 'recovery page'
 stub 8080 '	respond /rest/public/name "{\"status\":\"OK\"}" 200
 	respond "not found" 404'
-expect "/healthz: 200 ok once the server answers /rest/public/name" /healthz            200 ok
+expect "/healthz: 200 ok once the server answers /rest/public/name"  /healthz  200 ok
+expect "/healthz/: 200 ok once the server answers /rest/public/name" /healthz/ 200 ok
 unstub 8080
 stub 8080 '	respond "boom" 500'
-expect "/healthz: 503 while the server answers 5xx"                 /healthz            503
+expect "/healthz: 503 while the server answers 5xx"                 /healthz             503 "$DOWN"
+unstub 9000
+stub 9000 '	respond "boom" 500'
+expect "/healthz/supervisor: 503 while the supervisor answers 5xx"  /healthz/supervisor  503 "$SUP_DOWN"
 exit "$F"
 PROBE
 )"

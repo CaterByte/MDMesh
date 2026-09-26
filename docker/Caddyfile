@@ -47,8 +47,12 @@
 	#                       an update healthy: GET /rest/public/name, no DB round-trip, no auth)
 	#   /healthz/supervisor the updater/recovery supervisor answers (update checks, recovery page, and the
 	#                       /files/agent.apk mirror that new enrollments download)
-	# `rewrite` inside reverse_proxy changes only the upstream request, so handle_errors below still sees /healthz.
-	handle /healthz {
+	# Each also answers with a trailing slash (exact paths only, nothing below them), so /healthz/ cannot fall through
+	# to the SPA's 200. `rewrite` inside reverse_proxy changes only the upstream request, so handle_errors below still
+	# sees the probe path.
+	@healthz path /healthz /healthz/
+	@healthzSupervisor path /healthz/supervisor /healthz/supervisor/
+	handle @healthz {
 		reverse_proxy server:8080 {
 			rewrite /rest/public/name
 			@up status 2xx
@@ -60,7 +64,7 @@
 			}
 		}
 	}
-	handle /healthz/supervisor {
+	handle @healthzSupervisor {
 		reverse_proxy supervisor:9000 {
 			rewrite /healthz
 			@up status 2xx
@@ -83,10 +87,10 @@
 	# If the server (API) is down/erroring, fall back to the supervisor's recovery page. Not for the health
 	# probes: proxied as-is, /healthz would reach the supervisor's own /healthz and call a dead server "ok".
 	handle_errors {
-		handle /healthz {
+		handle @healthz {
 			respond "server unavailable" 503
 		}
-		handle /healthz/supervisor {
+		handle @healthzSupervisor {
 			respond "supervisor unavailable" 503
 		}
 		handle {
