@@ -19,6 +19,9 @@ set -e
 : "${JWT_SECRET:=}"
 
 CONF_DIR=/usr/local/tomcat/conf/Catalina/localhost
+# The chown -R below hands conf/Catalina to the server user, and root writes ROOT.xml into CONF_DIR on the next start:
+# never follow a link planted there (a linked CONF_DIR is removed and recreated as a directory).
+[ -L "$CONF_DIR" ] && rm -f "$CONF_DIR"
 mkdir -p "$CONF_DIR" /opt/mdmesh/files /opt/mdmesh/plugins
 
 # The log4j config ROOT.xml's log4j.config names, rendered on every start like ROOT.xml itself. install/lib/log4j.sh is
@@ -69,7 +72,10 @@ else
   chmod 600 "$JWT_SECRET_FILE"
 fi
 
-cat > "$CONF_DIR/ROOT.xml" <<EOF
+# Written to a fresh mktemp file (O_EXCL, mode 600: it holds the DB password) that replaces ROOT.xml only after the
+# old one is removed, so a link planted at ROOT.xml is removed, not written through (a planted directory stops the start).
+_root_xml_tmp=$(mktemp "$CONF_DIR/ROOT.xml.XXXXXX")
+cat > "$_root_xml_tmp" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <Context>
     <Parameter name="JDBC.driver"   value="org.postgresql.Driver"/>
@@ -116,6 +122,8 @@ cat > "$CONF_DIR/ROOT.xml" <<EOF
     <Parameter name="email.recovery.body" value="/opt/mdmesh/emails/_LANGUAGE_/recovery_body.txt"/>
 </Context>
 EOF
+rm -f "$CONF_DIR/ROOT.xml"
+mv -f "$_root_xml_tmp" "$CONF_DIR/ROOT.xml"
 
 # Volumes from older deployments are root-owned; make them writable for the unprivileged user, then drop
 # root for good. setpriv ships with util-linux on the Debian-based tomcat image (no gosu needed).
