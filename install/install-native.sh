@@ -133,6 +133,7 @@ if [ -z "$HTTP_PORT" ]; then read -rp "  HTTP port [8080]: " _p; HTTP_PORT="${_p
 case "$HTTP_PORT" in ''|*[!0-9]*) echo "  Port must be a number."; exit 1 ;; esac
 { [ "$HTTP_PORT" -ge 1 ] && [ "$HTTP_PORT" -le 65535 ]; } || { echo "  Port must be 1-65535."; exit 1; }
 DB_PASSWORD=$(rand); HASH_SECRET=$(rand); ADMIN_PASSWORD=$(rand); RESET_TOKEN=$(openssl rand -hex 16)
+JWT_SECRET=$(openssl rand -hex 64)   # jwt.secretkey: hex only (see the reuse rule below)
 BASE_DIR=/opt/mdmesh
 CATALINA=/opt/mdmesh-tc
 TOMCAT_VER=9.0.89
@@ -192,10 +193,19 @@ stop_tomcat() {
 # it would silently break every already-enrolled device; reuse the value from the existing ROOT.xml.
 # (DB_PASSWORD is different: it is re-applied to the role via ALTER USER below, so a fresh one is fine.)
 _old_root="$CATALINA/conf/Catalina/localhost/ROOT.xml"
-if [ -f "$_old_root" ]; then
-  _old_secret=$(sed -n 's/.*name="hash.secret"[[:space:]]*value="\([^"]*\)".*/\1/p' "$_old_root" | head -n 1)
-  if [ -n "$_old_secret" ]; then HASH_SECRET="$_old_secret"; info "Reusing hash.secret from the existing install (enrolled devices keep working)"; fi
-fi
+# Value of <Parameter name="$1" value="…"/> in the existing ROOT.xml; empty when there is none.
+old_root_param() { [ -f "$_old_root" ] || return 0; sed -n "s/.*name=\"$1\"[[:space:]]*value=\"\([^\"]*\)\".*/\1/p" "$_old_root" | head -n 1; }
+_old_secret=$(old_root_param hash.secret)
+if [ -n "$_old_secret" ]; then HASH_SECRET="$_old_secret"; info "Reusing hash.secret from the existing install (enrolled devices keep working)"; fi
+# jwt.secretkey signs REST API clients' JWTs (/rest/public/jwt/login), so it is kept the same way: those tokens then
+# survive restarts and upgrades, and an install from before it existed gets the key generated above. JJWT 0.9.1
+# base64-decodes the key and silently drops characters outside the base64 alphabet and a trailing partial 4-character
+# group, so only hex, a multiple of 4 characters and at least 128 long (what we generate) is reused; anything else
+# (a hand edit) is replaced. docker/entrypoint.sh applies the same rule to JWT_SECRET.
+jwt_key_ok() { case "$1" in ''|*[!0-9a-fA-F]*) return 1 ;; esac; [ "${#1}" -ge 128 ] && [ $(( ${#1} % 4 )) -eq 0 ]; }
+_old_jwt=$(old_root_param jwt.secretkey)
+if jwt_key_ok "$_old_jwt"; then JWT_SECRET="$_old_jwt"; info "Reusing jwt.secretkey from the existing install (API clients stay signed in)"
+elif [ -n "$_old_jwt" ]; then info "Replacing the existing jwt.secretkey: it is not hex, a multiple of 4 and at least 128 characters (the JWT library would drop characters)"; fi
 
 step "Installing dependencies"
 # HERMETIC BUILD: pin JDK 17 and never fall back to the host default JDK. The server uses Lombok 1.18.20,
@@ -420,6 +430,7 @@ cat > "$CATALINA/conf/Catalina/localhost/ROOT.xml" <<XML
     <Parameter name="usage.scenario"    value="private"/>
     <Parameter name="secure.enrollment" value="0"/>
     <Parameter name="hash.secret"       value="${HASH_SECRET}"/>
+    <Parameter name="jwt.secretkey"     value="${JWT_SECRET}"/>
     <Parameter name="plugins.files.directory" value="${BASE_DIR}/plugins"/>
     <Parameter name="plugin.devicelog.persistence.config.class" value="com.hmdm.plugins.devicelog.persistence.postgres.DeviceLogPostgresPersistenceConfiguration"/>
     <Parameter name="role.orgadmin.id" value="2"/>
@@ -438,7 +449,7 @@ cat > "$CATALINA/conf/Catalina/localhost/ROOT.xml" <<XML
          so password-reset emails stay disabled on native installs. Add them when SMTP is needed. -->
 </Context>
 XML
-# ROOT.xml carries the DB password + hash.secret; umask should already yield 0600, but be explicit.
+# ROOT.xml carries the DB password, hash.secret and jwt.secretkey; umask should already yield 0600, but be explicit.
 chmod 600 "$CATALINA/conf/Catalina/localhost/ROOT.xml"
 # Tomcat runs unprivileged (like the Docker image). Create the service account and hand it the trees it
 # must write: the whole Tomcat base (logs/work/temp/conf/webapps) and the app dir (uploads, plugins, marker).

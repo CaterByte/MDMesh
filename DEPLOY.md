@@ -195,7 +195,20 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
 
 ## Security notes
 
-- Secrets (`DB_PASSWORD`, `HASH_SECRET`, admin password) are generated per install; `.env` is `chmod 600`.
+- Secrets (`DB_PASSWORD`, `HASH_SECRET`, admin password, JWT signing key) are generated per install; `.env` is
+  `chmod 600`.
+- The JWT signing key signs the tokens of REST API clients that sign in through `/rest/public/jwt/login`; the console
+  itself uses a session cookie. It is generated once and kept, so those tokens survive restarts and upgrades.
+  **Docker:** the server generates it on its first start into its data volume (`/opt/mdmesh/jwt.secret`, mode 600)
+  and reuses it on every start; an install made before it existed gets one on its first start of the new image, with
+  no manual step. It is not in `.env`, so `docker compose down -v` deletes it with the volume and API clients sign in
+  again. To pin it, set `JWT_SECRET=<output of openssl rand -hex 64>` in `.env`; it wins over the file. A quick-start
+  install made before this release also needs the line `JWT_SECRET: ${JWT_SECRET:-}` under `server:` →
+  `environment:` in its `docker-compose.yml` for that. **Native:** the installer writes it as `jwt.secretkey` in
+  Tomcat's `ROOT.xml` (mode 600, next to `hash.secret`) and keeps it across re-runs and upgrades; an install made
+  before it existed gets one on its next installer run. Use only a hex value that is a multiple of 4 characters and at
+  least 128 long: the JWT library silently drops other characters, so the Docker server refuses to start with any
+  other `JWT_SECRET` (and replaces a key file that holds one), and the native installer replaces such a `jwt.secretkey`.
 - TLS everywhere (Cloudflare or Caddy/Let's Encrypt). DB + server ports are never published.
 - The agent talks HTTPS only. Set `SECURE_ENROLLMENT=1` (and the matching secret on the agent) to
   require signed enrollment.
