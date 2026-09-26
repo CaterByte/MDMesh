@@ -11,7 +11,7 @@
 #                              # `docker compose down -v` first if you really want a clean slate.
 #        ./setup.sh --native   # hand off to the native (non-Docker) installer
 #        ./setup.sh --allow-downgrade  # registry IMAGE_OWNER only: build and run a checkout older than the running
-#                              # release (refused by default — see "The running version" below)
+#                              # release, or one with no readable release tag (both refused by default)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -45,6 +45,12 @@ done
 # Hand off to the native (non-Docker) installer, passing the remaining flags through so
 # `./setup.sh --native -y` really is unattended.
 if [ "$NATIVE" = 1 ]; then exec ./install/install-native.sh "${NATIVE_ARGS[@]}"; fi
+# Docker mode takes no other flag: a typo (--alow-downgrade) must not be silently ignored.
+if [ "${#NATIVE_ARGS[@]}" -gt 0 ]; then
+  err "Unknown option: ${NATIVE_ARGS[0]}"
+  sed -n '/^# Usage:/,/^set -euo pipefail/p' "$(basename "$0")" | sed '$d; s/^# \{0,1\}//' >&2
+  exit 2
+fi
 
 command -v docker >/dev/null || { err "Docker is required (or run ./setup.sh --native)."; exit 1; }
 if ! docker compose version >/dev/null 2>&1; then
@@ -67,6 +73,28 @@ echo
 # every run then refreshes CURRENT_VERSION from it below.
 REPO_VERSION=$(mdm_repo_version .)
 
+# What this run builds is what it reports (see "The running version" below), so on a registry owner, where apply.sh may
+# have moved the stack to a newer release than this checkout, refuse to build unless --allow-downgrade:
+# - a checkout older than the running release <running> (the .env CURRENT_VERSION, or SERVER_VERSION for an older .env
+#   without it; apply.sh writes both; empty on a fresh .env) would roll the code back;
+# - a checkout with no readable release tag (source tarball, no git, tags not fetched) is code of unknown version that
+#   would run under apply's release tags.
+# Called before anything is prompted for or written: right after an existing .env is read, or before a fresh one is
+# asked for. Also derives APPLY_SUPPORTED from IMAGE_OWNER (persisted below).
+version_preflight() {  # version_preflight <running>
+  if [ "${IMAGE_OWNER:-local}" = "local" ]; then APPLY_SUPPORTED=0; else APPLY_SUPPORTED=1; fi
+  [ "$APPLY_SUPPORTED" = 1 ] && [ "$ALLOW_DOWNGRADE" != 1 ] || return 0
+  if [ -z "$REPO_VERSION" ]; then
+    err "Refusing to build: IMAGE_OWNER=${IMAGE_OWNER} gets its updates from apply, and setup.sh can't tell which version this checkout is (no readable release tag) — build from a tagged git checkout, or re-run with --allow-downgrade to build it anyway."
+    exit 1
+  fi
+  if mdm_version_gt "$1" "$REPO_VERSION"; then
+    err "Refusing to build older code over this stack: running $1, checkout is ${REPO_VERSION} — git pull first, or re-run with --allow-downgrade."
+    err "(--allow-downgrade builds and runs this checkout's code against the current database.)"
+    exit 1
+  fi
+}
+
 if [ -f .env ] && [ "$RESET" != 1 ]; then
   # RE-RUN: reuse the existing .env verbatim — never regenerate secrets over a live deployment.
   # The pgdata volume keeps the ORIGINAL DB password (Postgres only reads POSTGRES_PASSWORD on
@@ -74,6 +102,7 @@ if [ -f .env ] && [ "$RESET" != 1 ]; then
   # invalidate every enrolled device's token. --reset opts out (see the header for when that's safe).
   say "Existing .env found — reusing it (secrets + hosting mode kept; use --reset to start over)."
   set -a; . ./.env; set +a
+  version_preflight "${CURRENT_VERSION:-${SERVER_VERSION:-}}"
   HOST=${BASE_URL#*://}; HOST=${HOST%%/*}
   if [ "${COMPOSE_PROFILES:-}" = "cloudflare" ]; then
     MODE=1
@@ -89,6 +118,7 @@ else
     warn "--reset: regenerating .env. If the old database still exists it needs the OLD password —"
     warn "run 'docker compose down -v' first for a genuinely clean slate."
   fi
+  version_preflight ""
   echo "Hosting mode:"
   echo "  1) Cloudflare Tunnel   (no open ports; Cloudflare manages TLS — needs a domain in Cloudflare)"
   echo "  2) Your own domain     (open 80/443; Caddy auto-provisions a Let's Encrypt cert)"
@@ -167,12 +197,12 @@ if [ -z "${GITHUB_REPO:-}" ]; then
 fi
 
 # Source builds (IMAGE_OWNER=local) cannot be updated by pulling images — keep the supervisor's one-click apply off
-# (updates = git pull && ./setup.sh). A registry owner (IMAGE_OWNER=<ghcr owner>) keeps it on. IMAGE_OWNER is the value
-# compose sees: the sourced .env on a re-run (quotes stripped, key missing → unset) or the caller's env on a fresh .env
-# (which the heredoc above wrote as ${IMAGE_OWNER:-local}) — same `:-local` default as docker-compose.yml.
+# (updates = git pull && ./setup.sh). A registry owner (IMAGE_OWNER=<ghcr owner>) keeps it on. version_preflight above
+# derived APPLY_SUPPORTED from the IMAGE_OWNER compose sees: the sourced .env on a re-run (quotes stripped, key missing →
+# unset) or the caller's env on a fresh .env (which the heredoc above wrote as ${IMAGE_OWNER:-local}) — same `:-local`
+# default as docker-compose.yml.
 # Persist AND export: a re-run has already exported the OLD .env value (set -a above), and compose gives the shell
 # environment priority over .env, so `up` below would otherwise recreate the supervisor with the stale setting.
-if [ "${IMAGE_OWNER:-local}" = "local" ]; then APPLY_SUPPORTED=0; else APPLY_SUPPORTED=1; fi
 setenv APPLY_SUPPORTED "$APPLY_SUPPORTED"
 export APPLY_SUPPORTED
 
@@ -182,19 +212,12 @@ export APPLY_SUPPORTED
 # with them) all follow the checkout's latest release tag (install/lib/version.sh, the native installer's rule) on EVERY
 # run, whoever owns the images. Without this a `git pull && ./setup.sh` builds new code into images named after an
 # older version, and on a registry owner a re-run would build old code under apply.sh's newer release tag.
-# Downgrade guard (registry owner, APPLY_SUPPORTED=1): apply.sh may have moved the stack past this checkout. Building
-# an older checkout would roll the code back, so refuse unless --allow-downgrade. The running release is the .env
-# CURRENT_VERSION, or SERVER_VERSION for an older .env without it (apply.sh writes both).
-# No tag to read (no git, no tags fetched) → no guard; keep the .env values and warn (CURRENT_VERSION falls back to a
-# release-shaped SERVER_VERSION, else 0.0.0).
+# version_preflight (above) has already refused an older checkout, or an untagged one, on a registry owner unless
+# --allow-downgrade.
+# No tag to read (no git, no tags fetched) → keep the .env values and warn (CURRENT_VERSION falls back to a
+# release-shaped SERVER_VERSION, else 0.0.0); on a registry owner this is only reached with --allow-downgrade.
 # Persisted + exported for the same reason as APPLY_SUPPORTED.
-RUNNING_VERSION=${CURRENT_VERSION:-${SERVER_VERSION:-}}
 if [ -n "$REPO_VERSION" ]; then
-  if [ "$APPLY_SUPPORTED" = 1 ] && [ "$ALLOW_DOWNGRADE" != 1 ] && mdm_version_gt "$RUNNING_VERSION" "$REPO_VERSION"; then
-    err "Refusing to build older code over this stack: running ${RUNNING_VERSION}, checkout is ${REPO_VERSION} — git pull first, or re-run with --allow-downgrade."
-    err "(--allow-downgrade builds and runs this checkout's code against the current database.)"
-    exit 1
-  fi
   CURRENT_VERSION=$REPO_VERSION
   SERVER_VERSION=$REPO_VERSION; WEB_VERSION=$REPO_VERSION; SUPERVISOR_VERSION=$REPO_VERSION
   setenv SERVER_VERSION "$SERVER_VERSION"; setenv WEB_VERSION "$WEB_VERSION"; setenv SUPERVISOR_VERSION "$SUPERVISOR_VERSION"
@@ -203,7 +226,11 @@ else
   if [ -z "${CURRENT_VERSION:-}" ]; then
     if [ -n "$(mdm_version_core "${SERVER_VERSION:-}")" ]; then CURRENT_VERSION=$SERVER_VERSION; else CURRENT_VERSION=0.0.0; fi
   fi
-  warn "Could not read a release tag from this checkout (git missing, or tags not fetched) — keeping CURRENT_VERSION=${CURRENT_VERSION}."
+  if [ "$APPLY_SUPPORTED" = 1 ]; then
+    warn "--allow-downgrade: no release tag readable in this checkout — building this checkout's code under the kept tag ${CURRENT_VERSION} (SERVER_VERSION=${SERVER_VERSION:-latest})."
+  else
+    warn "Could not read a release tag from this checkout (git missing, or tags not fetched) — keeping CURRENT_VERSION=${CURRENT_VERSION}."
+  fi
 fi
 setenv CURRENT_VERSION "$CURRENT_VERSION"
 export CURRENT_VERSION

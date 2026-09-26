@@ -161,7 +161,7 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
 | `GITHUB_TOKEN` | Optional — raises the API rate limit / reads a private repo. |
 | `IMAGE_OWNER` | GHCR owner (lowercase) the versioned images live under. |
 | `SERVER_VERSION` / `WEB_VERSION` | Running image tags **without the `v`** (`0.2.6`, not `v0.2.6`); bumped automatically on apply. `./setup.sh` builds every image from the checkout, so on every run it sets them to the checkout's version (whatever `IMAGE_OWNER` is): the images are named after the code they hold. |
-| `CURRENT_VERSION` | The running release, compared with GitHub's latest to decide "update available". Bumped on apply. `./setup.sh` rewrites it on every run from the checkout's latest tag (`git describe --tags`), like the native installer, and with a registry `IMAGE_OWNER` refuses a checkout older than it (see **Source (build) deploys** below). |
+| `CURRENT_VERSION` | The running release, compared with GitHub's latest to decide "update available". Bumped on apply. `./setup.sh` rewrites it on every run from the checkout's latest tag (`git describe --tags`), like the native installer, and with a registry `IMAGE_OWNER` refuses a checkout older than it, or one without a readable tag (see below). |
 | `SUPERVISOR_VERSION` | The supervisor's image tag. Apply never changes it (the supervisor never updates itself). The quick start tracks `latest`, so `docker compose pull && docker compose up -d` delivers supervisor fixes; pin it only if you want to freeze it (then bump it by hand to pick up fixes). `./setup.sh` builds the supervisor from the checkout and sets it to the checkout's version on every run. |
 | `APPLY_SUPPORTED` | `1` shows one-click **Update**, `0` shows the manual steps instead. `./setup.sh` rewrites it on every run from `IMAGE_OWNER` (`local` or unset → `0`); the source compose file defaults to `0`, the release compose to `1`. |
 | `AUTO_UPDATE` | `1` to apply verified releases unattended (also toggleable in **Settings**). |
@@ -183,9 +183,13 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
   keeps the old values and warns.
 - **`./setup.sh` with a registry `IMAGE_OWNER`** (one-click Update on) still builds the stack from the checkout, and
   apply may since have moved it to a newer release. If the checkout is older than the running `CURRENT_VERSION`,
-  setup.sh stops before building (`running 0.4.0, checkout is 0.3.1 — git pull first, or re-run with
+  setup.sh stops before changing anything (`running 0.4.0, checkout is 0.3.1 — git pull first, or re-run with
   --allow-downgrade`). `git pull` first; `./setup.sh --allow-downgrade` builds and runs the older code on purpose
-  (against the current database, which is not rolled back).
+  (against the current database, which is not rolled back). It also stops when it can't tell which version the
+  checkout is (no readable release tag: a source tarball, or tags not fetched); build from a tagged git checkout, or
+  pass `--allow-downgrade` to build that code under the release tags already in `.env`.
+- `./setup.sh` rejects an unknown option with a usage error (Docker mode); after `--native`, the other flags go to the
+  native installer.
 - Older agents keep working across server updates (versioned `/agent/v1` contract; see
   `docs/adr/0009-agent-v1-contract-stability.md`).
 
