@@ -17,10 +17,18 @@
 set -euo pipefail
 BASE="${1:-${BASE_URL:-http://localhost:8080}}"
 CJ="$(mktemp)"; OJ=""
-# Fixtures a later section creates register themselves here, so an abort (set -e) never leaves them behind.
-LIVE_RID=""; LIVE_OID=""
+# Fixtures a later section creates register themselves here, so an abort (set -e) never leaves them behind. A fixture
+# is unregistered only once its teardown check passed; if that check failed, cleanup() tries the teardown again.
+LIVE_RID=""; LIVE_OID=""; LIVE_OLOGIN=""
+# Id of the user with exactly this login, or nothing. Prints nothing (never a traceback) on a bad response because
+# cleanup() uses it too; the main flow checks for an empty result itself.
+uid_of(){ curl -s -b "$CJ" "$BASE/rest/private/users/all?filter=$1" | python3 -c "import sys,json
+try: print(next((u['id'] for u in json.load(sys.stdin)['data'] if u['login']==sys.argv[1]), ''))
+except Exception: pass" "$1"; }
 cleanup(){
   [ -z "$LIVE_RID" ] || curl -s -b "$CJ" -X POST "$BASE/rest/private/agent/v1/rollout/$LIVE_RID/cancel" >/dev/null || true
+  # The Observer exists before its id is known: if the id lookup itself aborted, find the user again by its login.
+  [ -n "$LIVE_OID" ] || [ -z "$LIVE_OLOGIN" ] || LIVE_OID=$(uid_of "$LIVE_OLOGIN" || true)
   [ -z "$LIVE_OID" ] || curl -s -b "$CJ" -X DELETE "$BASE/rest/private/users/other/$LIVE_OID" >/dev/null || true
   rm -f "$CJ" ${OJ:+"$OJ"}
 }
@@ -197,10 +205,12 @@ echo "== permissions: read-only Observer (role 100) cannot mutate =="
 OJ="$(mktemp)"
 OLOGIN="e2e-obs-$(date +%s)-$RANDOM" # users.login is varchar(30)
 OPW=$(printf '%s' "$OLOGIN-pw" | md5sum | awk '{print toupper($1)}')
+LIVE_OLOGIN="$OLOGIN"   # before the create call: from here on cleanup() can find the user even without its id
 chk "observer user created" "$(curl -s -b "$CJ" -X PUT -H 'Content-Type: application/json' \
   -d "{\"login\":\"$OLOGIN\",\"name\":\"$OLOGIN\",\"email\":\"$OLOGIN@e2e.invalid\",\"userRole\":{\"id\":100},\"newPassword\":\"$OPW\",\"allDevicesAvailable\":true,\"allConfigAvailable\":true}" \
   "$BASE/rest/private/users" | field "d['status']")" "OK"
-OID=$(curl -s -b "$CJ" "$BASE/rest/private/users/all?filter=$OLOGIN" | field "[u['id'] for u in d['data'] if u['login']=='$OLOGIN'][0]")
+OID=$(uid_of "$OLOGIN")
+[ -n "$OID" ] || { echo "  FAIL: observer user id lookup"; exit 1; }
 LIVE_OID="$OID"
 chk "observer login OK" "$(curl -s -c "$OJ" -H 'Content-Type: application/json' \
   -d "{\"login\":\"$OLOGIN\",\"password\":\"$OPW\"}" "$BASE/rest/public/auth/login" | field "d['status']")" "OK"
@@ -233,8 +243,9 @@ if [ "$(curl -s -b "$CJ" "$BASE/rest/private/agent/v1/rollout/active" | field "d
   chk "observer: rollout promote denied" "$(curl -s -b "$OJ" -X POST "$BASE/rest/private/agent/v1/rollout/$LIVE_RID/promote" | ores)" "$DENIED"
   chk "observer: rollout cancel denied" "$(curl -s -b "$OJ" -X POST "$BASE/rest/private/agent/v1/rollout/$LIVE_RID/cancel" | ores)" "$DENIED"
   chk "observer: rollout still active, still canary" "$(curl -s -b "$OJ" "$BASE/rest/private/agent/v1/rollout/active" | field "str((d.get('data') or {}).get('id'))+':'+str((d.get('data') or {}).get('stage'))")" "$LIVE_RID:canary"
-  chk "admin: rollout cancel OK" "$(curl -s -b "$CJ" -X POST "$BASE/rest/private/agent/v1/rollout/$LIVE_RID/cancel" | field "d['status']")" "OK"
-  LIVE_RID=""
+  CANCELLED=$(curl -s -b "$CJ" -X POST "$BASE/rest/private/agent/v1/rollout/$LIVE_RID/cancel" | field "d['status']")
+  chk "admin: rollout cancel OK" "$CANCELLED" "OK"
+  if [ "$CANCELLED" = OK ]; then LIVE_RID=""; fi
   chk "no active rollout left" "$(curl -s -b "$CJ" "$BASE/rest/private/agent/v1/rollout/active" | field "d['data'] is None")" "True"
 else
   echo "  SKIP: observer promote/cancel on a real rollout (this server already has an active rollout)"
@@ -242,8 +253,9 @@ fi
 chk "observer: command history readable" "$(curl -s -b "$OJ" "$BASE/rest/private/agent/v1/devices/$DID/commands?since=0" | field "d['status']")" "OK"
 chk "observer: device state readable" "$(curl -s -b "$OJ" "$BASE/rest/private/agent/v1/devices/$DID/state" | field "str(d['status'])+':'+str(d['data']['battery'])")" "OK:77"
 chk "observer: active rollout readable" "$(curl -s -b "$OJ" "$BASE/rest/private/agent/v1/rollout/active" | field "d['status']")" "OK"
-chk "observer user deleted" "$(curl -s -b "$CJ" -X DELETE "$BASE/rest/private/users/other/$OID" | field "d['status']")" "OK"
-LIVE_OID=""
+DELETED=$(curl -s -b "$CJ" -X DELETE "$BASE/rest/private/users/other/$OID" | field "d['status']")
+chk "observer user deleted" "$DELETED" "OK"
+if [ "$DELETED" = OK ]; then LIVE_OID=""; LIVE_OLOGIN=""; fi
 
 echo "===== RESULT: PASS=$PASS FAIL=$FAIL ====="
 [ "$FAIL" -eq 0 ]
