@@ -160,8 +160,8 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
 | `POLL_INTERVAL_HOURS` | How often to check (default `6`). |
 | `GITHUB_TOKEN` | Optional — raises the API rate limit / reads a private repo. |
 | `IMAGE_OWNER` | GHCR owner (lowercase) the versioned images live under. |
-| `SERVER_VERSION` / `WEB_VERSION` | Running image tags **without the `v`** (`0.2.6`, not `v0.2.6`); bumped automatically on apply. |
-| `CURRENT_VERSION` | The running release, compared with GitHub's latest to decide "update available". Bumped on apply; `./setup.sh` rewrites it on every run from the checkout's latest tag (`git describe --tags`), like the native installer. |
+| `SERVER_VERSION` / `WEB_VERSION` | Running image tags **without the `v`** (`0.2.6`, not `v0.2.6`); bumped automatically on apply. On from-source installs (`IMAGE_OWNER=local`) `./setup.sh` sets them, and `SUPERVISOR_VERSION`, to the checkout's version on every run, so the locally built images are named after the code they hold. |
+| `CURRENT_VERSION` | The running release, compared with GitHub's latest to decide "update available". Bumped on apply. On from-source installs (`IMAGE_OWNER=local`) `./setup.sh` rewrites it on every run from the checkout's latest tag (`git describe --tags`), like the native installer; with a registry `IMAGE_OWNER` it keeps the value apply wrote. |
 | `SUPERVISOR_VERSION` | The supervisor's image tag. Apply never changes it (the supervisor never updates itself). The quick start tracks `latest`, so `docker compose pull && docker compose up -d` delivers supervisor fixes; pin it only if you want to freeze it (then bump it by hand to pick up fixes). |
 | `APPLY_SUPPORTED` | `1` shows one-click **Update**, `0` shows the manual steps instead. `./setup.sh` rewrites it on every run from `IMAGE_OWNER` (`local` → `0`); the source compose file defaults to `0`, the release compose to `1`. |
 | `AUTO_UPDATE` | `1` to apply verified releases unattended (also toggleable in **Settings**). |
@@ -179,7 +179,7 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
   `curl 127.0.0.1:9000/recovery` (not `https://<host>/recovery`).
 - **Source (build) deploys** can't auto-pull, so setup.sh hides one-click Update (`APPLY_SUPPORTED=0`); update with
   `git pull && ./setup.sh`. Re-running `./setup.sh` (rather than `docker compose up -d --build` alone) is what refreshes
-  `CURRENT_VERSION` and `APPLY_SUPPORTED`; without a readable tag (no git, or tags not fetched) it keeps the old
+  `CURRENT_VERSION`, the local image tags and `APPLY_SUPPORTED`; without a readable tag (no git, or tags not fetched) it keeps the old
   `CURRENT_VERSION` and warns.
 - Older agents keep working across server updates (versioned `/agent/v1` contract; see
   `docs/adr/0009-agent-v1-contract-stability.md`).

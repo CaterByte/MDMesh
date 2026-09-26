@@ -173,11 +173,20 @@ if [ "${IMAGE_OWNER:-local}" = "local" ]; then APPLY_SUPPORTED=0; else APPLY_SUP
 setenv APPLY_SUPPORTED "$APPLY_SUPPORTED"
 export APPLY_SUPPORTED
 
-# The running version, refreshed on EVERY run (this run rebuilds from the checkout): the checkout's latest release tag,
-# the same rule as the native installer (install/lib/version.sh). The supervisor compares it with GitHub's latest release,
-# so a stale or placeholder 0.0.0 shows a false "Update available". No tag to read (no git, no tags fetched) → keep the
-# .env value (0.0.0 on a fresh .env). Persisted + exported for the same reason as APPLY_SUPPORTED.
-if [ -n "$REPO_VERSION" ]; then
+# The running version. The supervisor compares CURRENT_VERSION with GitHub's latest release, so a stale or placeholder
+# 0.0.0 shows a false "Update available". Who owns it depends on who updates the stack:
+# - Source install (APPLY_SUPPORTED=0): this run rebuilds from the checkout, so CURRENT_VERSION is refreshed on EVERY run
+#   from the checkout's latest release tag (install/lib/version.sh, the native installer's rule), and so are the tags of
+#   the locally built images (compose tags each `build:` result with SERVER/WEB/SUPERVISOR_VERSION; without this, a
+#   `git pull && ./setup.sh` builds new code into images still named after the first run's version). No tag to read
+#   (no git, no tags fetched) → keep the .env values (0.0.0 on a fresh .env).
+# - Registry owner (APPLY_SUPPORTED=1): apply.sh bumps CURRENT_VERSION and the image tags when it pulls a release, so a
+#   re-run (possibly from an older checkout) must not move them backwards: keep the .env values. A fresh .env already
+#   recorded the checkout's tag above.
+# Persisted + exported for the same reason as APPLY_SUPPORTED.
+if [ "$APPLY_SUPPORTED" = 1 ]; then
+  CURRENT_VERSION=${CURRENT_VERSION:-0.0.0}
+elif [ -n "$REPO_VERSION" ]; then
   CURRENT_VERSION=$REPO_VERSION
 else
   CURRENT_VERSION=${CURRENT_VERSION:-0.0.0}
@@ -185,6 +194,11 @@ else
 fi
 setenv CURRENT_VERSION "$CURRENT_VERSION"
 export CURRENT_VERSION
+if [ "$APPLY_SUPPORTED" = 0 ]; then
+  SERVER_VERSION=$CURRENT_VERSION; WEB_VERSION=$CURRENT_VERSION; SUPERVISOR_VERSION=$CURRENT_VERSION
+  setenv SERVER_VERSION "$SERVER_VERSION"; setenv WEB_VERSION "$WEB_VERSION"; setenv SUPERVISOR_VERSION "$SUPERVISOR_VERSION"
+  export SERVER_VERSION WEB_VERSION SUPERVISOR_VERSION
+fi
 
 say "Checking GitHub Releases for the signed agent APK…"
 # Mirror of the native installer's release fetch: pull the latest release's manifest + APK, verify
