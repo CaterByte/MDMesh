@@ -13,6 +13,12 @@ agent-android/.kotlin
 agent-android/**/build
 agent-android/local.properties
 server/build.properties
+# Legacy AngularJS console output (grunt/bower): webapp/lib would otherwise be packaged into ROOT.war.
+server/src/main/webapp/lib
+server/webtarget
+**/bower_components
+# Local dev-run base directory (rotated logs), wherever a run left it.
+**/_BASE_DIRECTORY_
 reference
 brain
 .claude
@@ -23,6 +29,12 @@ brain
 **/.env.local
 **/.env.*.local
 **/*.log
+**/*.bak
+**/*.orig
+**/*.swp
+**/*~
+**/.DS_Store
+**/Thumbs.db
 **/*.apk
 **/*.aab
 **/*.jks
