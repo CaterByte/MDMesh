@@ -14,6 +14,9 @@
     <Parameter name="usage.scenario"   value="private"/>
     <Parameter name="secure.enrollment" value="0"/>
     <Parameter name="hash.secret"      value="dev-only-change-me"/>
+    <!-- Empty: a random JWT key at every start (fine for dev). The Docker images keep a persistent one
+         (JWT_SECRET, or generated once into /opt/mdmesh/jwt.secret; see docker/entrypoint.sh). -->
+    <Parameter name="jwt.secretkey"    value=""/>
 
     <Parameter name="plugins.files.directory" value="/opt/mdmesh/plugins"/>
     <Parameter name="plugin.devicelog.persistence.config.class"

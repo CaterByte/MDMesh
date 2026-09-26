@@ -16,9 +16,39 @@ set -e
 : "${SMTP_HOST:=}"
 : "${SMTP_PORT:=25}"
 : "${SMTP_FROM:=mdm@localhost}"
+: "${JWT_SECRET:=}"
 
 CONF_DIR=/usr/local/tomcat/conf/Catalina/localhost
 mkdir -p "$CONF_DIR" /opt/mdmesh/files /opt/mdmesh/plugins
+
+# jwt.secretkey signs the JWTs of REST API clients (/rest/public/jwt/login; the console uses its session cookie). Left
+# empty, the server picks a random key at every start and signs those clients out on each restart. So: an explicit
+# JWT_SECRET wins; otherwise the key is generated once into the persistent /opt/mdmesh volume and reused on every
+# start. That covers every Docker install with no manual step, including quick-start ones whose compose never changes.
+# JJWT 0.9.1 base64-decodes the key and silently DROPS characters outside the base64 alphabet and a trailing partial
+# 4-character group, so accept only hex, a multiple of 4 characters, at least 128 (512 bits, the HS512 minimum).
+JWT_SECRET_FILE=/opt/mdmesh/jwt.secret
+jwt_secret_ok() {
+  case "$1" in '' | *[!0-9a-fA-F]*) return 1 ;; esac
+  [ "${#1}" -ge 128 ] && [ $(( ${#1} % 4 )) -eq 0 ]
+}
+if [ -n "$JWT_SECRET" ]; then
+  if ! jwt_secret_ok "$JWT_SECRET"; then
+    echo "JWT_SECRET must be hex, a multiple of 4 characters and at least 128 long (the JWT library would silently drop anything else). Generate one with: openssl rand -hex 64 (or unset JWT_SECRET to use the key kept in $JWT_SECRET_FILE)" >&2
+    exit 1
+  fi
+else
+  [ -f "$JWT_SECRET_FILE" ] && JWT_SECRET=$(cat "$JWT_SECRET_FILE")
+  if ! jwt_secret_ok "$JWT_SECRET"; then
+    [ -f "$JWT_SECRET_FILE" ] && echo "WARNING: $JWT_SECRET_FILE does not hold a valid key; replacing it (REST API clients sign in again once)." >&2
+    JWT_SECRET=$(od -An -v -tx1 -N64 /dev/urandom | tr -d ' \n')
+    jwt_secret_ok "$JWT_SECRET" || { echo "Could not generate a JWT signing key from /dev/urandom." >&2; exit 1; }
+    # umask 077 -> mode 600, written aside then renamed (atomic). The chown -R below hands it to the server user.
+    (umask 077 && printf '%s\n' "$JWT_SECRET" > "$JWT_SECRET_FILE.tmp")
+    mv -f "$JWT_SECRET_FILE.tmp" "$JWT_SECRET_FILE"
+  fi
+  chmod 600 "$JWT_SECRET_FILE"
+fi
 
 cat > "$CONF_DIR/ROOT.xml" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -35,6 +65,7 @@ cat > "$CONF_DIR/ROOT.xml" <<EOF
     <Parameter name="usage.scenario"    value="private"/>
     <Parameter name="secure.enrollment" value="${SECURE_ENROLLMENT}"/>
     <Parameter name="hash.secret"       value="${HASH_SECRET}"/>
+    <Parameter name="jwt.secretkey"     value="${JWT_SECRET}"/>
 
     <Parameter name="plugins.files.directory" value="/opt/mdmesh/plugins"/>
     <Parameter name="plugin.devicelog.persistence.config.class"
