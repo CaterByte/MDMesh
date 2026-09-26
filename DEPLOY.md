@@ -196,7 +196,7 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
 ## Health checks
 
 Docker installs answer two unauthenticated probes at the edge, for uptime monitors. Each returns `200 ok` or a
-`503` with a short reason, never the console page. A trailing slash (`/healthz/`, `/healthz/supervisor/`) works too:
+`503` with a short reason, never the console page. A trailing slash (`/healthz/`, `/healthz/supervisor/`) works too.
 
 | Probe | `200 ok` when | `503` when |
 |-------|---------------|------------|
@@ -207,9 +207,11 @@ No answer at all means the edge itself is down. Neither probe queries the databa
 `postgres` as `healthy` from its own `pg_isready` check. `/healthz` also fails, as it should, for the minute or so
 an update takes to recreate the server.
 
-**Native installs** have no `/healthz` (Tomcat answers 404 there). Point the monitor at
-`https://<host>/rest/public/name` through your proxy, and check the supervisor on the host with
-`curl -fsS 127.0.0.1:9000/healthz` or `systemctl is-active mdmesh-supervisor`.
+**Native installs** have no edge probes: `/healthz` and `/healthz/supervisor` answer `404`, never the console page
+(an install from before this release serves the console there until its next installer run, `sudo ./setup.sh
+--native -y`). Point the monitor at `https://<host>/rest/public/name` through your proxy, and check the supervisor,
+which listens on loopback `:9000` only, on the host with `curl -fsS 127.0.0.1:9000/healthz` or
+`systemctl is-active mdmesh-supervisor`.
 
 ## Security notes
 

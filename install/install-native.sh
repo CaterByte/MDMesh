@@ -405,9 +405,11 @@ mkdir -p "$CATALINA/webapps/ROOT"
 ( cd "$CATALINA/webapps/ROOT" && "$JAVA_HOME/bin/jar" -xf "$REPO/server/target/launcher.war" )
 cp -a "$REPO"/web/dist/. "$CATALINA/webapps/ROOT/"   # index.html + assets at / (server maps /rest,/files,/agent)
 # SPA fallback (verified on Tomcat 9.0.89): !-f serves real files (assets) as-is; the negative lookahead
-# leaves the API paths (/rest,/files,/agent) alone; everything else → index.html so client-side routes
-# survive a reload. Paired with the RewriteValve declared in ROOT.xml above.
-printf 'RewriteCond %%{REQUEST_URI} !-f\nRewriteRule ^/(?!rest|files|agent|update)(.*)$ /index.html\n' \
+# leaves the API paths (/rest,/files,/agent,/update) alone; everything else → index.html so client-side routes
+# survive a reload. /healthz and anything below it is left alone too, so it 404s here instead of returning the
+# console's 200: native has no health route (that's Docker's edge), and a monitor pointed at it must see a failure.
+# Paired with the RewriteValve declared in ROOT.xml above.
+printf 'RewriteCond %%{REQUEST_URI} !-f\nRewriteRule ^/(?!rest|files|agent|update|healthz(?:/|$))(.*)$ /index.html\n' \
   > "$CATALINA/webapps/ROOT/WEB-INF/rewrite.config"
 mkdir -p "$BASE_DIR/files" "$BASE_DIR/plugins" "$CATALINA/conf/Catalina/localhost"
 cp install/log4j_template.xml "$BASE_DIR/log4j-mdmesh.xml"
