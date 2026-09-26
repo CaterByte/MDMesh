@@ -10,6 +10,8 @@
 #                              # new DB_PASSWORD locks the server out of its own data. Run
 #                              # `docker compose down -v` first if you really want a clean slate.
 #        ./setup.sh --native   # hand off to the native (non-Docker) installer
+#        ./setup.sh --allow-downgrade  # registry IMAGE_OWNER only: build and run a checkout older than the running
+#                              # release (refused by default — see "The running version" below)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -30,12 +32,13 @@ setenv() {
   if grep -q "^$1=" .env 2>/dev/null; then sed -i "s#^$1=.*#$1=$2#" .env; else printf '%s=%s\n' "$1" "$2" >> .env; fi
 }
 
-RESET=0
+RESET=0; ALLOW_DOWNGRADE=0
 NATIVE=0; NATIVE_ARGS=()
 for a in "$@"; do
   case "$a" in
     --native) NATIVE=1 ;;
     --reset)  RESET=1 ;;
+    --allow-downgrade) ALLOW_DOWNGRADE=1 ;;   # Docker path only: the native installer has no apply to protect
     *)        NATIVE_ARGS+=("$a") ;;   # forwarded to the native installer (-y, -v)
   esac
 done
@@ -173,32 +176,37 @@ if [ "${IMAGE_OWNER:-local}" = "local" ]; then APPLY_SUPPORTED=0; else APPLY_SUP
 setenv APPLY_SUPPORTED "$APPLY_SUPPORTED"
 export APPLY_SUPPORTED
 
-# The running version. The supervisor compares CURRENT_VERSION with GitHub's latest release, so a stale or placeholder
-# 0.0.0 shows a false "Update available". Who owns it depends on who updates the stack:
-# - Source install (APPLY_SUPPORTED=0): this run rebuilds from the checkout, so CURRENT_VERSION is refreshed on EVERY run
-#   from the checkout's latest release tag (install/lib/version.sh, the native installer's rule), and so are the tags of
-#   the locally built images (compose tags each `build:` result with SERVER/WEB/SUPERVISOR_VERSION; without this, a
-#   `git pull && ./setup.sh` builds new code into images still named after the first run's version). No tag to read
-#   (no git, no tags fetched) → keep the .env values (0.0.0 on a fresh .env).
-# - Registry owner (APPLY_SUPPORTED=1): apply.sh bumps CURRENT_VERSION and the image tags when it pulls a release, so a
-#   re-run (possibly from an older checkout) must not move them backwards: keep the .env values. A fresh .env already
-#   recorded the checkout's tag above.
+# The running version. What this run builds is what it reports: `up --build` below rebuilds every image from the
+# checkout, so CURRENT_VERSION (which the supervisor compares with GitHub's latest release; a stale or placeholder 0.0.0
+# shows a false "Update available") and the image tags SERVER/WEB/SUPERVISOR_VERSION (compose tags each `build:` result
+# with them) all follow the checkout's latest release tag (install/lib/version.sh, the native installer's rule) on EVERY
+# run, whoever owns the images. Without this a `git pull && ./setup.sh` builds new code into images named after an
+# older version, and on a registry owner a re-run would build old code under apply.sh's newer release tag.
+# Downgrade guard (registry owner, APPLY_SUPPORTED=1): apply.sh may have moved the stack past this checkout. Building
+# an older checkout would roll the code back, so refuse unless --allow-downgrade. The running release is the .env
+# CURRENT_VERSION, or SERVER_VERSION for an older .env without it (apply.sh writes both).
+# No tag to read (no git, no tags fetched) → no guard; keep the .env values and warn (CURRENT_VERSION falls back to a
+# release-shaped SERVER_VERSION, else 0.0.0).
 # Persisted + exported for the same reason as APPLY_SUPPORTED.
-if [ "$APPLY_SUPPORTED" = 1 ]; then
-  CURRENT_VERSION=${CURRENT_VERSION:-0.0.0}
-elif [ -n "$REPO_VERSION" ]; then
+RUNNING_VERSION=${CURRENT_VERSION:-${SERVER_VERSION:-}}
+if [ -n "$REPO_VERSION" ]; then
+  if [ "$APPLY_SUPPORTED" = 1 ] && [ "$ALLOW_DOWNGRADE" != 1 ] && mdm_version_gt "$RUNNING_VERSION" "$REPO_VERSION"; then
+    err "Refusing to build older code over this stack: running ${RUNNING_VERSION}, checkout is ${REPO_VERSION} — git pull first, or re-run with --allow-downgrade."
+    err "(--allow-downgrade builds and runs this checkout's code against the current database.)"
+    exit 1
+  fi
   CURRENT_VERSION=$REPO_VERSION
+  SERVER_VERSION=$REPO_VERSION; WEB_VERSION=$REPO_VERSION; SUPERVISOR_VERSION=$REPO_VERSION
+  setenv SERVER_VERSION "$SERVER_VERSION"; setenv WEB_VERSION "$WEB_VERSION"; setenv SUPERVISOR_VERSION "$SUPERVISOR_VERSION"
+  export SERVER_VERSION WEB_VERSION SUPERVISOR_VERSION
 else
-  CURRENT_VERSION=${CURRENT_VERSION:-0.0.0}
+  if [ -z "${CURRENT_VERSION:-}" ]; then
+    if [ -n "$(mdm_version_core "${SERVER_VERSION:-}")" ]; then CURRENT_VERSION=$SERVER_VERSION; else CURRENT_VERSION=0.0.0; fi
+  fi
   warn "Could not read a release tag from this checkout (git missing, or tags not fetched) — keeping CURRENT_VERSION=${CURRENT_VERSION}."
 fi
 setenv CURRENT_VERSION "$CURRENT_VERSION"
 export CURRENT_VERSION
-if [ "$APPLY_SUPPORTED" = 0 ]; then
-  SERVER_VERSION=$CURRENT_VERSION; WEB_VERSION=$CURRENT_VERSION; SUPERVISOR_VERSION=$CURRENT_VERSION
-  setenv SERVER_VERSION "$SERVER_VERSION"; setenv WEB_VERSION "$WEB_VERSION"; setenv SUPERVISOR_VERSION "$SUPERVISOR_VERSION"
-  export SERVER_VERSION WEB_VERSION SUPERVISOR_VERSION
-fi
 
 say "Checking GitHub Releases for the signed agent APK…"
 # Mirror of the native installer's release fetch: pull the latest release's manifest + APK, verify
