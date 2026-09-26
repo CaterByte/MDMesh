@@ -5,8 +5,8 @@
 # from the old workflows are copied along with the commands they explain. A fourth entry,
 # supervisor, builds the updater/recovery supervisor image and runs its unit tests plus
 # scripts/supervisor-smoke.sh against it (the compose-shaped start guard for #27). A fifth, edge,
-# runs scripts/edge-check.sh: the Caddyfile in every hosting mode under the web image's own caddy, plus
-# `docker compose config` for every compose file/overlay/profile combination.
+# runs scripts/edge-check.sh: the Caddyfile in every hosting mode under the web image's own caddy, its /healthz
+# routes against stub upstreams, plus `docker compose config` for every compose file/overlay/profile combination.
 name: t0-fast
 
 on:
@@ -125,7 +125,8 @@ jobs:
         run: docker rmi -f "$SUP_IMG" >/dev/null 2>&1 || true
 
       # --- edge: the Cloudflare-mode Caddyfile break (empty ACME_EMAIL) shipped because nothing parsed it. Validates
-      # docker/Caddyfile in every hosting mode with the caddy image web.Dockerfile builds FROM, and every compose combo. ---
+      # docker/Caddyfile in every hosting mode with the caddy image web.Dockerfile builds FROM, and every compose combo;
+      # then checks /healthz and /healthz/supervisor report their upstream's health (503, never the SPA's 200). ---
       - if: matrix.name == 'edge' && (needs.paths.outputs.all == 'true' || fromJSON(needs.paths.outputs.matched).edge)
         name: Caddyfile modes + compose overlays
         run: scripts/edge-check.sh
