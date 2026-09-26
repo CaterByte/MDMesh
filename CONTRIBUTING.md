@@ -35,19 +35,20 @@ You only need the toolchain for the plane you're touching.
 ```bash
 cd web
 npm install
-npm run dev          # Vite dev server (proxies the API; point VITE_API_BASE at a running server)
+npm run dev          # Vite dev server on :5173, proxied to the dev stack (VITE_DEV_PROXY_TARGET to change)
 npm run build        # production build
-npx tsc --noEmit     # type-check
+npx tsc -b --noEmit  # type-check (-b: tsconfig.json only references the real projects)
 ```
 
 ### Server (`common/`, `server/`)
 Requires **JDK 17** and Maven.
 ```bash
+cp -n server/build.properties.example server/build.properties   # once: the server build reads it
 mvn -pl common test          # fast, DB-free unit + contract tests
 mvn -pl server -am compile   # type-check the server + its modules
 mvn -pl server -am package -DskipTests   # build the WAR (full build)
 ```
-The full server run needs PostgreSQL — easiest is the Docker stack below.
+The full server run needs PostgreSQL: use the dev stack below.
 
 ### Agent (`agent-android/`)
 Requires **JDK 17** + the **Android SDK** (set `ANDROID_SDK_ROOT`). A `local.properties` with `sdk.dir`
@@ -71,9 +72,12 @@ cd .. && docker build -f docker/supervisor.Dockerfile -t mdmesh-supervisor:dev .
 
 ### The whole stack, locally
 ```bash
-./setup.sh           # Docker Compose: Postgres + server + Caddy + supervisor (+ optional tunnel)
+docker compose --env-file docker/dev.env up -d --build   # Postgres + server + Caddy/console + supervisor, loopback only
+scripts/dev-seed.sh                                       # first run: seed the DB; console http://localhost:8088, admin / admin
+scripts/agent-v1-e2e.sh http://localhost:8080             # the Agent v1 end-to-end suite against it
 ```
-See **[DEPLOY.md](DEPLOY.md)** for hosting modes, the update pipeline, and recovery.
+Ports, the fast Java loop, the debugger and reset are in **[docs/DEV.md](docs/DEV.md)**. `./setup.sh` is the
+production installer (it writes a `.env` for a real host); see **[DEPLOY.md](DEPLOY.md)**.
 
 ---
 

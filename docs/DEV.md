@@ -1,107 +1,112 @@
 # Dev environment
 
-Three planes run independently. This box (the authoring sandbox) has only Node + Python +
-a Java runtime, so the **server and agent first build on a provisioned machine / CI**, not here.
+Three planes run independently; you only need the toolchain for the one you are changing.
 
 ## Prerequisites
 
 | Plane | Needs |
 |-------|-------|
-| Control plane (server) | Docker + Docker Compose |
+| Control plane (server) | Docker + Docker Compose; the scripts also need bash, curl, python3, openssl and md5sum (GNU coreutils); the fast Java loop needs JDK 17 + Maven |
 | Admin frontend (web)   | Node 22 (Vite 8 needs ≥ 20.19), npm |
 | Device agent           | JDK 17, Android SDK (cmdline-tools), an AOSP emulator or a factory-reset device |
 
-## 1. Control plane (Postgres + Tomcat server)
+## 1. Control plane (the dev stack)
+
+The dev stack is the production stack (`docker-compose.yml`: Postgres, server, Caddy with the console, supervisor)
+plus a thin overlay, `docker-compose.dev.yml`, that publishes loopback-only ports and a debugger port. Its settings
+live in `docker/dev.env`: the project name `mdmesh-dev`, dev-only passwords, `:dev` image tags and an inert
+supervisor. Pass that file on **every** compose command for the dev stack. It replaces `.env`, so a production `.env`
+in the same checkout is never read, and the overlay refuses to load without it.
 
 ```bash
-docker compose -f docker-compose.dev.yml up --build
+docker compose --env-file docker/dev.env up -d --build    # build + start; the first boot runs Liquibase
+scripts/dev-seed.sh                                        # first run: seed the database like the installers do
 ```
 
-- First boot runs **Liquibase**, which creates the schema and the default `admin` user.
-- Panel: <http://localhost:8080>  ·  default login **admin / admin**.
-- Optional seed (display names, role descriptions, system app list) — run **after** the app has
-  finished initializing (i.e. after the schema exists):
+| What | Where |
+|------|-------|
+| Console | <http://localhost:8088>, login **admin / admin** (after `scripts/dev-seed.sh`) |
+| API (direct to Tomcat) | <http://localhost:8080/rest/> |
+| Postgres | `localhost:5432`, database, user and password `mdmesh` |
+| Debugger (JDWP) | attach your IDE to `localhost:5005` |
 
-  ```bash
-  # hmdm_init.en.sql has an _ADMIN_EMAIL_ placeholder; substitute then apply
-  sed 's/_ADMIN_EMAIL_/admin@localhost/' install/sql/hmdm_init.en.sql \
-    | docker compose -f docker-compose.dev.yml exec -T postgres psql -U hmdm -d hmdm
-  ```
+Every port binds to `127.0.0.1`. If one is taken, export `DEV_WEB_PORT`, `DEV_API_PORT`, `DEV_PG_PORT` or
+`DEV_DEBUG_PORT` before running compose (shell variables override `docker/dev.env`). If you move the console, also
+export `BASE_URL=http://localhost:<port>`.
 
-Config is supplied by `docker/context.xml` (mounted as Tomcat's ROOT context). Edit it to change
-DB creds, base URL, MQTT, etc.
+Configuration is environment only: `docker/entrypoint.sh` renders Tomcat's `ROOT.xml` from it at every start. Change a
+value in `docker/dev.env` (or export it) and run the `up -d` command again.
+
+`scripts/dev-seed.sh` seeds through `install/lib/db.sh`, the same code the installers run, then sets the admin
+password through the real first-login flow: `admin`, or the value of `DEV_ADMIN_PASSWORD` if you export one. On a
+database that is already seeded it only re-applies the post-seed repairs, and finishes the admin password reset if an
+earlier run was interrupted before it. It refuses to run unless the stack's containers were created with
+`docker-compose.dev.yml`, so it never seeds a production install.
+
+```bash
+docker compose --env-file docker/dev.env logs -f server              # server log
+docker compose --env-file docker/dev.env up -d --build server        # rebuild + restart the server image
+docker compose --env-file docker/dev.env down                        # stop; keeps the data
+docker compose --env-file docker/dev.env down -v                     # reset: also deletes the dev database and files
+```
+
+`down -v` deletes the server's data volume too (`/opt/mdmesh`: uploaded files and the JWT signing key in
+`jwt.secret`), so the next start generates a new key. With `--env-file docker/dev.env`, `down -v` only ever deletes the
+`mdmesh-dev` project's volumes. Do not run the dev stack in a checkout that also runs a real install (`./setup.sh`
+writes a `.env` there): in that directory any compose command without `--env-file docker/dev.env`, even a `down -v`
+naming the dev file, acts on the production project, because compose falls back to the project name in `.env`.
+
+**Fast Java loop.** Rebuilding the server image runs the whole Maven build inside Docker (over a minute). For quicker
+turns, build on the host (JDK 17) and copy the WAR into the running container; Tomcat reloads it within about 20 s:
+
+```bash
+cp -n server/build.properties.example server/build.properties     # once
+mvn -pl server -am package -DskipTests
+docker compose --env-file docker/dev.env cp server/target/launcher.war server:/usr/local/tomcat/webapps/ROOT.war
+```
+
+The copied WAR lasts until the container is recreated (`down`, or `up -d --build` after a source change); then the
+image's own build is back.
 
 ## 2. Admin frontend (React)
 
 ```bash
 cd web
 npm install
-npm run dev          # Vite dev server; proxies /rest -> http://localhost:8080
+npm run dev          # http://localhost:5173 with hot reload, proxied to the dev stack
 ```
 
-See `web/README.md` for env vars and the endpoints it targets.
+The Vite dev server proxies `/rest`, `/files`, `/agent/ws`, `/update` and `/recovery` to the dev stack's Caddy
+(<http://localhost:8088>), which routes them the way production does. Point it elsewhere with
+`VITE_DEV_PROXY_TARGET` (see `web/README.md`). It listens on every interface, so you can open it from a phone on your
+LAN; run it only on a network you trust.
 
 ## 3. Device agent (Kotlin)
 
 ```bash
 cd agent-android
-gradle wrapper --gradle-version 8.10   # one-time: generates the wrapper jar (not committed)
 ./gradlew :app:assembleDebug
 ```
 
-### ADB Device-Owner enrollment loop (dev)
-
-Device Owner can only be set on a device with **no accounts** (fresh / factory-reset). Use an
-**AOSP** emulator image (not a Google APIs image — those add a Google account and block DO).
-
-```bash
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb shell dpm set-device-owner com.mdmesh.agent/.AdminReceiver
-# verify
-adb shell dumpsys device_policy | grep -i "Device Owner"
-```
-
-To unwind during testing:
-
-```bash
-adb shell dpm remove-active-admin com.mdmesh.agent/.AdminReceiver   # if removable
-# otherwise wipe the emulator / factory-reset the device
-```
-
-Point the agent at your local server via the agent's `BASE_URL` BuildConfig (defaults documented
-in `agent-android/README.md`). For a hardware device, the server URL must be reachable from the
-device (use your LAN IP, not localhost).
+To enroll an emulator or test device as Device Owner over ADB, follow "ADB Device-Owner dev enrollment loop" in
+`agent-android/README.md` (debug builds are `com.mdmesh.agent.debug`). Without a QR code, the agent uses the
+`MDM_BASE_URL` its build type bakes in (`agent-android/app/build.gradle.kts`). The agent has no cleartext-HTTP
+exception, so a device needs a server it can reach over HTTPS (see `DEPLOY.md`). The loopback dev stack serves the
+console, the API and the scripted agent loop below.
 
 ## End-to-end agent loop (Agent v1)
 
-`scripts/agent-v1-e2e.sh` drives the whole protocol against a running server with `curl`
-playing the device: enroll → mint token → queue command → authenticated, capability-gated
-check-in → ack. It verifies the per-device-secret auth and the capability gate.
-
-A fresh Liquibase-only DB needs four one-time setups (normally done via the admin UI on first
-run; here applied directly for a scripted run):
+`scripts/agent-v1-e2e.sh` drives the whole protocol against a running server with `curl` playing the device: enroll →
+mint token → queue command → authenticated, capability-gated check-in → ack, plus the command and rollout scenarios
+built on them. On the dev stack, after `scripts/dev-seed.sh`:
 
 ```bash
-# 1. seed base data (configurations, settings, system apps, roles)
-sed 's/_ADMIN_EMAIL_/admin@localhost/' install/sql/hmdm_init.en.sql | psql ... -d hmdm
-# 2-4. enable scripted enrollment
-psql ... -d hmdm -c "UPDATE users    SET passwordreset=false        WHERE id=1;"  # else 403 on /rest/private/*
-psql ... -d hmdm -c "UPDATE settings SET createnewdevices=true      WHERE id=1;"  # allow on-demand device creation
-psql ... -d hmdm -c "UPDATE settings SET newdeviceconfigurationid=1 WHERE id=1;"  # devices.configurationId is NOT NULL
+scripts/agent-v1-e2e.sh http://localhost:8080      # expect "RESULT: PASS=<n> FAIL=0"
 ```
 
-Then:
+It signs in as `admin` with `ADMIN_PW` (default `admin`, what `dev-seed.sh` sets). If you seeded with
+`DEV_ADMIN_PASSWORD`, pass the same value as `ADMIN_PW`. For another server, seed it the way `scripts/dev-seed.sh`
+does and pass `ADMIN_PW=<password>`.
 
-```bash
-scripts/agent-v1-e2e.sh http://localhost:8080   # expect "RESULT: PASS=8 FAIL=0"
-```
-
-Verified locally: server built on JDK 17, run on Tomcat 9 + Postgres 17, all 8 checks pass.
-The remaining step that needs a provisioned box is the **real on-device run**: build the agent,
-enroll an AOSP emulator as Device Owner via ADB, and watch a `policy.apply` apply on the device.
-
-## Tooling-gap note
-
-The server `docker compose` build, the agent Gradle build, and the ADB enrollment cannot run in
-the authoring sandbox (no Docker/Android SDK/adb). They are exercised in CI (`.github/workflows/`)
-and on developer machines. The web build **does** run locally.
+The remaining step that needs a provisioned box is the **real on-device run**: build the agent, enroll an AOSP
+emulator as Device Owner via ADB, and watch a `policy.apply` apply on the device.

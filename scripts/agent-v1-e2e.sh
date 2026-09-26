@@ -5,15 +5,11 @@
 # emulator: enroll -> mint token -> queue command -> authenticated capability-gated
 # check-in -> ack.
 #
-# Prerequisites (a fresh Liquibase-only DB is NOT enough — these are normally set via
-# the admin UI on first run):
-#   1. Seed base data:   psql ... -f install/sql/hmdm_init.en.sql   (set _ADMIN_EMAIL_)
-#   2. Clear the forced password reset:  UPDATE users SET passwordreset=false WHERE id=1;
-#   3. Enable on-demand device creation: UPDATE settings SET createnewdevices=true WHERE id=1;
-#   4. Set a default new-device config:  UPDATE settings SET newdeviceconfigurationid=1 WHERE id=1;
-# (See docs/DEV.md "End-to-end agent loop".)
+# Prerequisite: a database seeded like a real install (a Liquibase-only one is NOT enough). On the dev stack run
+# scripts/dev-seed.sh; it seeds through install/lib/db.sh, as the installers do, and sets the admin password to
+# "admin" (or DEV_ADMIN_PASSWORD; pass the same value as ADMIN_PW). (See docs/DEV.md "End-to-end agent loop".)
 #
-# Usage: scripts/agent-v1-e2e.sh [BASE_URL]      (default http://localhost:8080)
+# Usage: [ADMIN_PW=<admin password>] scripts/agent-v1-e2e.sh [BASE_URL]      (defaults: admin, http://localhost:8080)
 set -euo pipefail
 BASE="${1:-${BASE_URL:-http://localhost:8080}}"
 CJ="$(mktemp)"; OJ=""

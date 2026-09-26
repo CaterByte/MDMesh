@@ -15,7 +15,7 @@ cooperating planes plus shared protocol and docs.
 ├── proto/                                             # Shared protocol: capability matrix + command model (source of truth)
 ├── docs/adr/                                          # Architecture Decision Records (one-way-door choices)
 ├── reference/hmdm-android/                            # gitignored study clone of upstream agent (Apache-2.0, NOT shipped)
-└── infra/ (docker-compose.dev.yml at root)            # Dev environment
+└── docker/  docker-compose*.yml                       # Docker stack; dev = docker-compose.dev.yml overlay + docker/dev.env (docs/DEV.md)
 ```
 
 ## The four planes
