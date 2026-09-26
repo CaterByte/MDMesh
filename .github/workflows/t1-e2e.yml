@@ -77,14 +77,14 @@ jobs:
           scripts/agent-v1-e2e.sh "http://$API"
 
       - name: Collect logs
-        if: failure()
+        if: failure() || cancelled()   # cancelled covers the job timeout
         run: |
           mkdir -p e2e-logs
           docker compose --env-file docker/dev.env ps -a > e2e-logs/ps.txt 2>&1 || true
           docker compose --env-file docker/dev.env logs --no-color --timestamps > e2e-logs/compose.log 2>&1 || true
           sid=$(docker compose --env-file docker/dev.env ps -aq server 2>/dev/null) || true
           [ -z "$sid" ] || docker cp "$sid":/usr/local/tomcat/logs e2e-logs/tomcat-logs || true
-      - if: failure()
+      - if: failure() || cancelled()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: t1-e2e-logs
