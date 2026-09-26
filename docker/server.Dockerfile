@@ -23,7 +23,9 @@ COPY --from=build /src/server/target/launcher.war /usr/local/tomcat/webapps/ROOT
 # so uploaded files + the hosted agent APK survive container recreation.
 RUN mkdir -p /opt/mdmesh/files /opt/mdmesh/plugins \
  && groupadd -r mdmesh && useradd -r -g mdmesh -d /opt/mdmesh -s /usr/sbin/nologin mdmesh
-COPY install/log4j_template.xml /opt/mdmesh/log4j-mdmesh.xml
+# The log4j template + its render rule (install/lib/log4j.sh, shared with the native installer); entrypoint.sh writes
+# /opt/mdmesh/log4j-mdmesh.xml from them on every start, so a volume holding an older copy is repaired too.
+COPY install/log4j_template.xml install/lib/log4j.sh /usr/local/share/mdmesh/
 COPY install/emails /opt/mdmesh/emails
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

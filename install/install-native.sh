@@ -16,6 +16,8 @@ REPO="$PWD"   # repo root — used for absolute paths inside subshells (e.g. exp
 . "$REPO/install/lib/db.sh"
 # shellcheck source=lib/version.sh
 . "$REPO/install/lib/version.sh"
+# shellcheck source=lib/log4j.sh
+. "$REPO/install/lib/log4j.sh"
 
 [ "$(id -u)" = "0" ] || { echo "Run as root (sudo)."; exit 1; }
 command -v apt-get >/dev/null || { echo "This script targets Debian/Ubuntu."; exit 1; }
@@ -412,7 +414,7 @@ cp -a "$REPO"/web/dist/. "$CATALINA/webapps/ROOT/"   # index.html + assets at / 
 printf 'RewriteCond %%{REQUEST_URI} !-f\nRewriteRule ^/(?!rest|files|agent|update|healthz(?:/|$))(.*)$ /index.html\n' \
   > "$CATALINA/webapps/ROOT/WEB-INF/rewrite.config"
 mkdir -p "$BASE_DIR/files" "$BASE_DIR/plugins" "$CATALINA/conf/Catalina/localhost"
-cp install/log4j_template.xml "$BASE_DIR/log4j-mdmesh.xml"
+mdm_render_log4j install/log4j_template.xml "$BASE_DIR"   # the Docker entrypoint writes it with the same rule
 cp -r install/emails "$BASE_DIR/" 2>/dev/null || true
 # Host the release agent APK the QR points at (/files/agent.apk), if we fetched one above.
 [ -n "$AGENT_APK" ] && { cp "$AGENT_APK" "$BASE_DIR/files/agent.apk"; ok "agent APK hosted at /files/agent.apk"; }
