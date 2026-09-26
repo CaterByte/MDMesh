@@ -84,7 +84,10 @@ updates:
       docker-images: { patterns: ["*"] }
     ignore:
       # Base images use floating tags, so patch/security rebuilds come from the registry on every image build.
-      # A tag change is a platform decision, never a routine bump:
+      # Exception: caddy (docker/web.Dockerfile, the edge) is pinned to an exact release because a Caddy release can
+      # change how docker/Caddyfile parses. It is deliberately NOT ignored: each release arrives in this group's PR,
+      # and T0's `edge` job (scripts/edge-check.sh) validates the Caddyfile in every hosting mode against it.
+      # For the floating tags, a tag change is a platform decision, never a routine bump:
       # tomcat >= 10 is jakarta.* (server is javax.*); the JDK line is chosen with the runtime (see CONTRIBUTING.md).
       - dependency-name: "tomcat"
         versions: [">= 10"]

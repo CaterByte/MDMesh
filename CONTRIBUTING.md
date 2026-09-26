@@ -124,7 +124,9 @@ deps (`agent-toolchain`, `agent-libs`).
   (20) are not yet, and `web/package.json` has no `engines` pin yet, so CI builds the web with the runner's
   default Node. They move to 24 in one PR that also adds `engines`. After that, all of them move together once
   the next even line has been LTS for a few months. Docker base images use floating tags, so rebuilds pick up
-  patches; a tag change is a deliberate PR.
+  patches; a tag change is a deliberate PR. The exception is the edge's `caddy` image (`docker/web.Dockerfile`),
+  pinned to an exact release so how the Caddyfile parses changes only through a Dependabot PR that T0's `edge`
+  check has validated.
 - **Vendored CI actions** (`.github/actions/ci-kit/`) change only by re-running ci-kit's `scripts/vendor.sh`.
 
 ---
