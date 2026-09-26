@@ -145,6 +145,31 @@ TOMCAT_VER=9.0.89
 export CATALINA_PID="$CATALINA/tomcat.pid"
 SVC_USER=mdmesh            # unprivileged account Tomcat runs as (mirrors the Docker image)
 SVC_UNIT=mdmesh-server     # systemd unit that owns Tomcat
+# Root writes into $CATALINA, which this script chowns to $SVC_USER (on this run and on every earlier one), so a link
+# planted there must never be followed. tc_guard REL refuses (fails the install) when $CATALINA or any component of
+# $CATALINA/REL is a symbolic link. tc_write REL CMD... guards REL, runs CMD with its stdout going to a fresh mode-600
+# file (mktemp) in REL's directory, and renames that over REL in one step (mv -fT never follows a link or descends
+# into a directory there). Tomcat is stopped before these run, so no $SVC_USER process can race them.
+tc_guard() {
+  local p="$CATALINA" part
+  local -a parts
+  IFS=/ read -r -a parts <<< "$1"
+  if [ -L "$p" ]; then _fail "Refusing to write under $CATALINA: it is a symbolic link. Remove it and re-run."; fi
+  for part in "${parts[@]}"; do
+    p="$p/$part"
+    if [ -L "$p" ]; then _fail "Refusing to write $CATALINA/$1: $p is a symbolic link (the service user owns this tree). Remove it and re-run."; fi
+  done
+}
+tc_write() {
+  local rel="$1" tmp
+  shift
+  tc_guard "$rel"
+  mkdir -p "$(dirname "$CATALINA/$rel")"
+  tmp=$(mktemp "$CATALINA/$rel.XXXXXX")
+  if "$@" > "$tmp" && chmod 600 "$tmp" && mv -fT "$tmp" "$CATALINA/$rel"; then return 0; fi
+  rm -f "$tmp"
+  _fail "Could not write $CATALINA/$rel"
+}
 have_systemd() { command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; }
 port_holder() {
   if command -v ss >/dev/null 2>&1; then ss -ltnp 2>/dev/null | awk -v p=":$HTTP_PORT$" '$4 ~ p {print; exit}'
@@ -397,8 +422,10 @@ else
 fi
 # Point Tomcat's HTTP connector at the chosen port. Idempotent across re-runs: rewrite whatever numeric
 # port currently sits on the HTTP/1.1 connector (leaves the shutdown/AJP ports untouched).
-sed -i -E "s#(<Connector port=\")[0-9]+(\" protocol=\"HTTP/1.1\")#\1${HTTP_PORT}\2#" "$CATALINA/conf/server.xml"
+# tc_write checks for links before sed reads the file, so a link there is not read through either.
+tc_write conf/server.xml sed -E "s#(<Connector port=\")[0-9]+(\" protocol=\"HTTP/1.1\")#\1${HTTP_PORT}\2#" "$CATALINA/conf/server.xml"
 info "HTTP port set to ${HTTP_PORT}"
+tc_guard webapps   # the glob below would otherwise empty a linked directory's target as root
 rm -rf "$CATALINA"/webapps/*
 # Deploy the server as an EXPLODED webapp (not ROOT.war) and overlay the built SPA into it, so a single
 # Tomcat serves the console at / and the API at /rest on one origin. Exploding ourselves (no ROOT.war
@@ -411,14 +438,15 @@ cp -a "$REPO"/web/dist/. "$CATALINA/webapps/ROOT/"   # index.html + assets at / 
 # survive a reload. /healthz and anything below it is left alone too, so it 404s here instead of returning the
 # console's 200: native has no health route (that's Docker's edge), and a monitor pointed at it must see a failure.
 # Paired with the RewriteValve declared in ROOT.xml above.
-printf 'RewriteCond %%{REQUEST_URI} !-f\nRewriteRule ^/(?!rest|files|agent|update|healthz(?:/|$))(.*)$ /index.html\n' \
-  > "$CATALINA/webapps/ROOT/WEB-INF/rewrite.config"
-mkdir -p "$BASE_DIR/files" "$BASE_DIR/plugins" "$CATALINA/conf/Catalina/localhost"
+tc_write webapps/ROOT/WEB-INF/rewrite.config \
+  printf 'RewriteCond %%{REQUEST_URI} !-f\nRewriteRule ^/(?!rest|files|agent|update|healthz(?:/|$))(.*)$ /index.html\n'
+mkdir -p "$BASE_DIR/files" "$BASE_DIR/plugins"   # tc_write creates conf/Catalina/localhost after checking for links
 mdm_render_log4j install/log4j_template.xml "$BASE_DIR"   # the Docker entrypoint writes it with the same rule
 cp -r install/emails "$BASE_DIR/" 2>/dev/null || true
 # Host the release agent APK the QR points at (/files/agent.apk), if we fetched one above.
 [ -n "$AGENT_APK" ] && { cp "$AGENT_APK" "$BASE_DIR/files/agent.apk"; ok "agent APK hosted at /files/agent.apk"; }
-cat > "$CATALINA/conf/Catalina/localhost/ROOT.xml" <<XML
+# ROOT.xml carries the DB password, hash.secret and jwt.secretkey: tc_write makes it mode 600.
+tc_write conf/Catalina/localhost/ROOT.xml cat <<XML
 <?xml version="1.0" encoding="UTF-8"?>
 <Context>
     <!-- SPA fallback: serve index.html for client-side routes so a reload on /devices etc. works.
@@ -453,8 +481,6 @@ cat > "$CATALINA/conf/Catalina/localhost/ROOT.xml" <<XML
          so password-reset emails stay disabled on native installs. Add them when SMTP is needed. -->
 </Context>
 XML
-# ROOT.xml carries the DB password, hash.secret and jwt.secretkey; umask should already yield 0600, but be explicit.
-chmod 600 "$CATALINA/conf/Catalina/localhost/ROOT.xml"
 # Tomcat runs unprivileged (like the Docker image). Create the service account and hand it the trees it
 # must write: the whole Tomcat base (logs/work/temp/conf/webapps) and the app dir (uploads, plugins, marker).
 if ! id -u "$SVC_USER" >/dev/null 2>&1; then

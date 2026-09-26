@@ -72,9 +72,13 @@ else
   chmod 600 "$JWT_SECRET_FILE"
 fi
 
-# Written to a fresh mktemp file (O_EXCL, mode 600: it holds the DB password) that replaces ROOT.xml only after the
-# old one is removed, so a link planted at ROOT.xml is removed, not written through (a planted directory stops the start).
+# Written to a fresh mktemp file (O_EXCL, mode 600: it holds the DB password) that is renamed over ROOT.xml in one step
+# (mv -fT replaces a link planted there instead of following it; a planted directory stops the start). The temp file
+# holds the secrets too: the trap removes it if this start fails before the rename, and leftovers of a start that was
+# killed outright are removed first.
+rm -f "$CONF_DIR"/ROOT.xml.??????
 _root_xml_tmp=$(mktemp "$CONF_DIR/ROOT.xml.XXXXXX")
+trap 'rm -f "$_root_xml_tmp"' EXIT
 cat > "$_root_xml_tmp" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <Context>
@@ -122,8 +126,8 @@ cat > "$_root_xml_tmp" <<EOF
     <Parameter name="email.recovery.body" value="/opt/mdmesh/emails/_LANGUAGE_/recovery_body.txt"/>
 </Context>
 EOF
-rm -f "$CONF_DIR/ROOT.xml"
-mv -f "$_root_xml_tmp" "$CONF_DIR/ROOT.xml"
+mv -fT "$_root_xml_tmp" "$CONF_DIR/ROOT.xml"
+trap - EXIT
 
 # Volumes from older deployments are root-owned; make them writable for the unprivileged user, then drop
 # root for good. setpriv ships with util-linux on the Debian-based tomcat image (no gosu needed).
