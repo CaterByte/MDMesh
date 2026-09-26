@@ -155,7 +155,10 @@ if [ "$rc" -ne 0 ] && [ "$n" -eq 0 ]; then fail "health routes: probe container 
 # refuse to load without dev.env, or a setup.sh .env in the same checkout (COMPOSE_PROJECT_NAME=mdmesh) would point
 # the dev stack at the production containers and database volume. ---
 echo "Dev stack (docker compose --env-file docker/dev.env):"
-unset MDMESH_DEV
+# Shell variables beat --env-file, so unset every variable the compose files require (${VAR:?...}, which includes the
+# MDMESH_DEV guard): only dev.env may supply them here, whatever the developer's shell exports.
+# shellcheck disable=SC2046  # word splitting intended: one variable name per word
+unset $(grep -ohE '\$\{[A-Za-z_][A-Za-z0-9_]*:\?' docker-compose.yml docker-compose.dev.yml | sed 's/^\${//; s/:?$//' | sort -u)
 if out="$(docker compose --env-file docker/dev.env config 2>&1)"; then
   proj="$(printf '%s\n' "$out" | awk '$1 == "name:" { print $2; exit }')"
   if [ "$proj" = mdmesh-dev ]; then pass "compose --env-file docker/dev.env (project $proj)"
@@ -164,10 +167,14 @@ else
   fail "compose --env-file docker/dev.env"
   printf '%s\n' "$out" | tail -5 | sed 's/^/         /'
 fi
-if docker compose --env-file "$ENVF" -f docker-compose.yml -f docker-compose.dev.yml config -q >/dev/null 2>&1; then
+# Refused by the guard itself: an unrelated config error must not count as the refusal.
+if out="$(docker compose --env-file "$ENVF" -f docker-compose.yml -f docker-compose.dev.yml config -q 2>&1)"; then
   fail "the dev overlay loaded without docker/dev.env"
-else
+elif grep -qF 'run the dev stack with --env-file docker/dev.env' <<<"$out"; then
   pass "the dev overlay refuses to load without docker/dev.env"
+else
+  fail "the dev overlay failed without docker/dev.env, but not on its MDMESH_DEV guard"
+  printf '%s\n' "$out" | tail -5 | sed 's/^/         /'
 fi
 
 if [ "$FAILED" -ne 0 ]; then echo "edge-check: $FAILED check(s) failed"; exit 1; fi
