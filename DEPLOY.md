@@ -193,6 +193,24 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
 - Older agents keep working across server updates (versioned `/agent/v1` contract; see
   `docs/adr/0009-agent-v1-contract-stability.md`).
 
+## Health checks
+
+Docker installs answer two unauthenticated probes at the edge, for uptime monitors. Each returns `200 ok` or a
+`503` with a short reason, never the console page. A trailing slash (`/healthz/`, `/healthz/supervisor/`) works too:
+
+| Probe | `200 ok` when | `503` when |
+|-------|---------------|------------|
+| `https://<host>/healthz` | Caddy is up **and** the API server answers `GET /rest/public/name` with a 2xx (the probe an update uses to decide the new version is healthy) | `server unavailable`: the server is stopped, still starting, or answering with errors |
+| `https://<host>/healthz/supervisor` | the updater/recovery supervisor answers its own `/healthz` | `supervisor unavailable`: the supervisor is down. The console, the API and enrolled devices keep working, but update checks, the recovery page and the `/files/agent.apk` mirror that new enrollments download do not |
+
+No answer at all means the edge itself is down. Neither probe queries the database: `docker compose ps` shows
+`postgres` as `healthy` from its own `pg_isready` check. `/healthz` also fails, as it should, for the minute or so
+an update takes to recreate the server.
+
+**Native installs** have no `/healthz` (Tomcat answers 404 there). Point the monitor at
+`https://<host>/rest/public/name` through your proxy, and check the supervisor on the host with
+`curl -fsS 127.0.0.1:9000/healthz` or `systemctl is-active mdmesh-supervisor`.
+
 ## Security notes
 
 - Secrets (`DB_PASSWORD`, `HASH_SECRET`, admin password, JWT signing key) are generated per install; `.env` is
