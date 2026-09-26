@@ -119,10 +119,12 @@ deps (`agent-toolchain`, `agent-libs`).
 - **Licenses:** a bump that changes a dependency's license (e.g. Liquibase 5 → FSL) is blocked until reviewed
   against [ADR-0008](docs/adr/0008-licensing-and-rebrand.md).
 - **One JDK, one Node line.** The server builds and runs on **JDK 17** (CI, Docker build + `tomcat:9.0-jdk17`
-  runtime, native installer). Node follows the current **LTS** line — **24** (the images still run 20/22 until
-  they move) — in `web/package.json` `engines`, both `docker/*.Dockerfile` `FROM node:` lines and `@types/node`;
-  move all of them in one PR once the next even line has been LTS for a few months. Docker base images use
-  floating tags, so rebuilds pick up patches; a tag change is a deliberate PR.
+  runtime, native installer). Node is the current **LTS** line — today **24**. The supervisor image
+  (`docker/supervisor.Dockerfile`) is on it; the web build image (`docker/web.Dockerfile`, 22) and `@types/node`
+  (20) are not yet, and `web/package.json` has no `engines` pin yet, so CI builds the web with the runner's
+  default Node. They move to 24 in one PR that also adds `engines`. After that, all of them move together once
+  the next even line has been LTS for a few months. Docker base images use floating tags, so rebuilds pick up
+  patches; a tag change is a deliberate PR.
 - **Vendored CI actions** (`.github/actions/ci-kit/`) change only by re-running ci-kit's `scripts/vendor.sh`.
 
 ---
