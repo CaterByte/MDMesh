@@ -209,7 +209,7 @@ LIVE_OLOGIN="$OLOGIN"   # before the create call: from here on cleanup() can fin
 chk "observer user created" "$(curl -s -b "$CJ" -X PUT -H 'Content-Type: application/json' \
   -d "{\"login\":\"$OLOGIN\",\"name\":\"$OLOGIN\",\"email\":\"$OLOGIN@e2e.invalid\",\"userRole\":{\"id\":100},\"newPassword\":\"$OPW\",\"allDevicesAvailable\":true,\"allConfigAvailable\":true}" \
   "$BASE/rest/private/users" | field "d['status']")" "OK"
-OID=$(uid_of "$OLOGIN")
+OID=$(uid_of "$OLOGIN" || true)   # a curl error must reach the FAIL below, not abort (cleanup() still finds the user)
 [ -n "$OID" ] || { echo "  FAIL: observer user id lookup"; exit 1; }
 LIVE_OID="$OID"
 chk "observer login OK" "$(curl -s -c "$OJ" -H 'Content-Type: application/json' \
