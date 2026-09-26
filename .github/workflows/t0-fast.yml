@@ -40,7 +40,7 @@ jobs:
             agent: agent-android/**, proto/**
             supervisor: supervisor/**, docker/supervisor.Dockerfile, release/minisign.pub, scripts/supervisor-smoke.sh
             # Listed explicitly: the kit's fail-closed **/Dockerfile* does not match docker/web.Dockerfile.
-            edge: docker/Caddyfile, docker/web.Dockerfile, docker-compose*.yml, scripts/edge-check.sh
+            edge: docker/Caddyfile, docker/web.Dockerfile, docker-compose*.yml, docker/dev.env, scripts/edge-check.sh
 
   build:
     name: ${{ matrix.name }}

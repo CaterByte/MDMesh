@@ -1,38 +1,29 @@
-# Dev environment for the control plane (Postgres + Tomcat server).
-# A lightweight dev stack; for a real host install use ./setup.sh (Docker) or ./setup.sh --native.
-# Usage and the post-start seeding step are documented in docs/DEV.md.
+# Dev stack = the production stack (docker-compose.yml) + this overlay: the same images, entrypoints, env contract,
+# volumes, Caddy routing and supervisor as a real install. This file only adds loopback-only ports and a debugger.
+# Always run it through docker/dev.env, which names the project mdmesh-dev, lists both compose files and holds the
+# dev-only values:
+#   docker compose --env-file docker/dev.env up -d --build     # build + start
+#   scripts/dev-seed.sh                                         # first run: seed the DB (login admin / admin)
+# Console http://localhost:8088 · API http://localhost:8080 · Postgres localhost:5432 · JDWP localhost:5005
+# A port is taken? Export DEV_WEB_PORT / DEV_API_PORT / DEV_PG_PORT / DEV_DEBUG_PORT first. The full loop: docs/DEV.md.
+
+# Refuse to load without docker/dev.env. That file pins the project name; without it, the .env that setup.sh writes
+# (COMPOSE_PROJECT_NAME=mdmesh) would point this overlay at a production stack's containers and database volume.
+x-dev-env: ${MDMESH_DEV:?run the dev stack with --env-file docker/dev.env (see docs/DEV.md)}
 
 services:
   postgres:
-    image: postgres:14
-    environment:
-      POSTGRES_DB: mdmesh
-      POSTGRES_USER: mdmesh
-      POSTGRES_PASSWORD: mdmesh
     ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      # SQL seed scripts mounted read-only; run manually AFTER first startup
-      # (they UPDATE rows Liquibase creates at app boot — not an initdb script).
-      - ./install/sql:/sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mdmesh -d mdmesh"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
+      - "127.0.0.1:${DEV_PG_PORT:-5432}:5432"
 
   server:
-    build:
-      context: .
-      dockerfile: docker/server.Dockerfile
-    depends_on:
-      postgres:
-        condition: service_healthy
+    environment:
+      # IDE attach; suspend=n so boot never waits for a debugger. catalina.sh reads CATALINA_OPTS.
+      CATALINA_OPTS: "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
     ports:
-      - "8080:8080"
-    # 31000 is the embedded MQTT broker; expose if you want devices to reach it directly.
-    # - "31000:31000"
+      - "127.0.0.1:${DEV_API_PORT:-8080}:8080"    # direct API: scripts/agent-v1-e2e.sh, the fast WAR loop
+      - "127.0.0.1:${DEV_DEBUG_PORT:-5005}:5005"
 
-volumes:
-  pgdata:
+  caddy:
+    ports:
+      - "127.0.0.1:${DEV_WEB_PORT:-8088}:80"      # the console as users get it (SPA + /rest + /update + /recovery)

@@ -8,6 +8,8 @@
 #   3. /healthz and /healthz/supervisor (with or without a trailing slash), served by that caddy against stub upstreams:
 #      503 + reason while the upstream is down or failing (not the SPA's or the recovery page's catch-all 200), 200 "ok"
 #      once it answers.
+#   4. The dev stack (docker-compose.dev.yml over docker-compose.yml) with docker/dev.env alone, and that the overlay
+#      refuses to load without it.
 # Guards the v0.3.1 Cloudflare-mode break: `email {$ACME_EMAIL}` with the empty ACME_EMAIL that setup.sh and
 # quickstart.sh write made the edge refuse to start, and nothing in CI parsed the Caddyfile.
 # Needs only a Docker daemon (+ compose plugin). Throwaway --rm containers, no network, no ports.
@@ -68,7 +70,6 @@ COMBOS=(
   "-f docker-compose.release.yml"
   "-f docker-compose.release.yml --profile cloudflare"
   "-f docker-compose.release.yml -f docker-compose.domain.yml"
-  "-f docker-compose.dev.yml"
 )
 for combo in "${COMBOS[@]}"; do
   read -r -a args <<< "$combo"
@@ -147,6 +148,27 @@ printf '%s\n' "$out"
 n="$(grep -c '^  FAIL' <<<"$out" || true)"
 FAILED=$((FAILED + n))
 if [ "$rc" -ne 0 ] && [ "$n" -eq 0 ]; then fail "health routes: probe container exited $rc"; fi
+
+# --- 4. The dev stack, configured by docker/dev.env ALONE (not the fixed env file above), so a variable
+# docker-compose.yml requires but dev.env lacks fails here. dev.env pins the project name: without it the project
+# would be named after the checkout directory ("MDMesh" -> mdmesh, the production project). And the overlay must
+# refuse to load without dev.env, or a setup.sh .env in the same checkout (COMPOSE_PROJECT_NAME=mdmesh) would point
+# the dev stack at the production containers and database volume. ---
+echo "Dev stack (docker compose --env-file docker/dev.env):"
+unset MDMESH_DEV
+if out="$(docker compose --env-file docker/dev.env config 2>&1)"; then
+  proj="$(printf '%s\n' "$out" | awk '$1 == "name:" { print $2; exit }')"
+  if [ "$proj" = mdmesh-dev ]; then pass "compose --env-file docker/dev.env (project $proj)"
+  else fail "compose --env-file docker/dev.env: project is '$proj', want mdmesh-dev"; fi
+else
+  fail "compose --env-file docker/dev.env"
+  printf '%s\n' "$out" | tail -5 | sed 's/^/         /'
+fi
+if docker compose --env-file "$ENVF" -f docker-compose.yml -f docker-compose.dev.yml config -q >/dev/null 2>&1; then
+  fail "the dev overlay loaded without docker/dev.env"
+else
+  pass "the dev overlay refuses to load without docker/dev.env"
+fi
 
 if [ "$FAILED" -ne 0 ]; then echo "edge-check: $FAILED check(s) failed"; exit 1; fi
 echo "edge-check: all checks passed"
