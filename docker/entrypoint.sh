@@ -38,14 +38,27 @@ if [ -n "$JWT_SECRET" ]; then
     exit 1
   fi
 else
-  [ -f "$JWT_SECRET_FILE" ] && JWT_SECRET=$(cat "$JWT_SECRET_FILE")
+  # This runs as root in a directory the server user owns: never follow a link there (chmod/read would act on its target).
+  [ -L "$JWT_SECRET_FILE" ] && rm -f "$JWT_SECRET_FILE"
+  # Whitespace/CR are not part of a key (a hand-pinned file saved with CRLF must not be rotated).
+  [ -f "$JWT_SECRET_FILE" ] && JWT_SECRET=$(tr -d ' \r\n' < "$JWT_SECRET_FILE")
   if ! jwt_secret_ok "$JWT_SECRET"; then
-    [ -f "$JWT_SECRET_FILE" ] && echo "WARNING: $JWT_SECRET_FILE does not hold a valid key; replacing it (REST API clients sign in again once)." >&2
-    JWT_SECRET=$(od -An -v -tx1 -N64 /dev/urandom | tr -d ' \n')
-    jwt_secret_ok "$JWT_SECRET" || { echo "Could not generate a JWT signing key from /dev/urandom." >&2; exit 1; }
-    # umask 077 -> mode 600, written aside then renamed (atomic). The chown -R below hands it to the server user.
-    (umask 077 && printf '%s\n' "$JWT_SECRET" > "$JWT_SECRET_FILE.tmp")
-    mv -f "$JWT_SECRET_FILE.tmp" "$JWT_SECRET_FILE"
+    if [ -e "$JWT_SECRET_FILE" ]; then
+      echo "WARNING: $JWT_SECRET_FILE does not hold a valid key; replacing it (REST API clients sign in again once)." >&2
+      rm -f "$JWT_SECRET_FILE"
+    fi
+    _jwt_new=$(od -An -v -tx1 -N64 /dev/urandom | tr -d ' \n')
+    jwt_secret_ok "$_jwt_new" || { echo "Could not generate a JWT signing key from /dev/urandom." >&2; exit 1; }
+    # mktemp: a fresh, unique mode-600 file (O_EXCL, so a planted name or link is never written through). ln publishes
+    # it only if no key exists yet, so concurrent first starts converge on the first writer's key; mv is the fallback
+    # for a volume without hard links. The chown -R below hands the file to the server user.
+    _jwt_tmp=$(mktemp "$JWT_SECRET_FILE.XXXXXX")
+    printf '%s\n' "$_jwt_new" > "$_jwt_tmp"
+    ln "$_jwt_tmp" "$JWT_SECRET_FILE" 2>/dev/null || [ -e "$JWT_SECRET_FILE" ] || mv -f "$_jwt_tmp" "$JWT_SECRET_FILE"
+    rm -f "$_jwt_tmp"
+    # Use what the file holds (possibly another start's key), so this process always matches the file.
+    JWT_SECRET=$(tr -d ' \r\n' < "$JWT_SECRET_FILE")
+    jwt_secret_ok "$JWT_SECRET" || { echo "$JWT_SECRET_FILE does not hold a valid key after writing it." >&2; exit 1; }
   fi
   chmod 600 "$JWT_SECRET_FILE"
 fi
