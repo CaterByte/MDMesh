@@ -2,6 +2,8 @@
 // fixtures (Playwright request interception), in dark mode, then round the corners (sharp).
 //
 //   node capture.mjs            # build is expected to exist at ../../web/dist
+//   node capture.mjs --check    # runtime smoke instead: visit every route, write nothing, exit 1 on any
+//                               # uncaught page error / console.error / missing app shell (dependency bumps)
 //
 // Output: ../../docs/screenshots/{overview,devices,device-detail,apps,rollout}.png
 import { chromium } from 'playwright';
@@ -16,6 +18,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.resolve(__dirname, '../../web/dist');
 const OUT = path.resolve(__dirname, '../../docs/screenshots');
 const fx = buildFixtures();
+const CHECK = process.argv.includes('--check');
 
 // ---- tiny static server for the SPA (with history fallback to index.html) ----
 const MIME = {
@@ -62,7 +65,7 @@ async function main() {
     console.error('web/dist not found — run `npm run build` in web/ first.');
     process.exit(1);
   }
-  fs.mkdirSync(OUT, { recursive: true });
+  if (!CHECK) fs.mkdirSync(OUT, { recursive: true });
   const server = serve();
   await new Promise((r) => server.listen(0, r));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -90,6 +93,9 @@ async function main() {
   });
 
   const page = await context.newPage();
+  const problems = [];
+  page.on('pageerror', (e) => problems.push(`pageerror on ${page.url()}: ${e.message}`));
+  page.on('console', (m) => { if (m.type() === 'error') problems.push(`console.error on ${page.url()}: ${m.text()}`); });
   const shots = [
     { name: 'overview', route: '/dashboard' },
     { name: 'devices', route: '/devices' },
@@ -98,6 +104,22 @@ async function main() {
     // The staged-rollout panel lives down the Settings page — capture it as a focused card.
     { name: 'rollout', route: '/settings', element: 'section.panel:has(h2:has-text("Agent rollout"))' },
   ];
+
+  if (CHECK) {
+    // Every routed page (web/src/App.tsx) plus the catch-all redirect.
+    for (const route of ['/dashboard', '/devices', '/devices/101', '/apps', '/configs', '/enroll', '/settings', '/no-such-page']) {
+      await page.goto(base + route, { waitUntil: 'domcontentloaded' });
+      const shell = await page.waitForSelector('.wordmark', { timeout: 10000 }).then(() => true, () => false);
+      await page.waitForTimeout(800);
+      if (!shell) problems.push(`no app shell on ${route}`);
+      console.log(`${shell ? 'ok  ' : 'FAIL'} ${route} -> ${new URL(page.url()).pathname}`);
+    }
+    await browser.close();
+    server.close();
+    if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
+    console.log('check: PASS');
+    return;
+  }
 
   for (const s of shots) {
     await page.goto(base + s.route, { waitUntil: 'domcontentloaded' });
