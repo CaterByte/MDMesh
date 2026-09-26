@@ -105,7 +105,17 @@ t.test('/update/status reports the mirrored APK as available once the warm-up do
   { skip: !HAS_MINISIGN && 'minisign not installed', timeout: 20000 }, async (tt) => {
     const fs = require('fs'), os = require('os'), path = require('path'), http = require('http'), crypto = require('crypto');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sup-apk-'));
-    tt.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    let gh = null, child = null;
+    // One hook, in order: the supervisor and the fake GitHub are fully down before the temp dir they use is removed.
+    tt.after(async () => {
+      if (child && child.exitCode === null && child.signalCode === null) {
+        const exited = new Promise((r) => child.once('exit', r));
+        child.kill();
+        await exited;
+      }
+      if (gh) { gh.closeAllConnections(); await new Promise((r) => gh.close(r)); }
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
 
     // A signed release: throwaway key pair, a manifest naming the APK by sha256, the detached signature beside it.
     const apk = crypto.randomBytes(4096);
@@ -117,7 +127,7 @@ t.test('/update/status reports the mirrored APK as available once the warm-up do
 
     // Fake GitHub: the releases API (counted) and the three release assets.
     let releaseCalls = 0;
-    const gh = http.createServer((req, res) => {
+    gh = http.createServer((req, res) => {
       const base = `http://127.0.0.1:${gh.address().port}`;
       if (req.url.startsWith('/repos/o/r/releases')) {
         releaseCalls++;
@@ -129,30 +139,30 @@ t.test('/update/status reports the mirrored APK as available once the warm-up do
       else { res.statusCode = 404; res.end(); }
     });
     await new Promise((r) => gh.listen(0, '127.0.0.1', r));
-    tt.after(() => gh.close());
 
     // server.js calls the fixed https://api.github.com origin; a preload points only that origin at the fake.
     const preload = path.join(dir, 'fake-github.js');
     fs.writeFileSync(preload, "const f = globalThis.fetch;\n"
       + "globalThis.fetch = (u, o) => f(String(u).replace('https://api.github.com', process.env.FAKE_GITHUB), o);\n");
     const port = await new Promise((r) => { const s = http.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
-    const child = cp.spawn(process.execPath, ['--require', preload, path.join(__dirname, 'server.js')], {
+    child = cp.spawn(process.execPath, ['--require', preload, path.join(__dirname, 'server.js')], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, FAKE_GITHUB: `http://127.0.0.1:${gh.address().port}`, GITHUB_REPO: 'o/r', GITHUB_TOKEN: '',
         SUPERVISOR_PORT: String(port), SUPERVISOR_BIND: '127.0.0.1', CURRENT_VERSION: '9.9.9', APPLY_SUPPORTED: '0', AUTO_UPDATE: '0',
+        UPDATE_CHANNEL: 'stable', POLL_INTERVAL_HOURS: '6',
         MANIFEST_PUBKEY: path.join(dir, 'k.pub'), APK_CACHE_DIR: path.join(dir, 'apk'), PUBLISH_APK_TO: '',
         AUTO_FILE: path.join(dir, 'auto.json'), RECOVERY_TOKEN_FILE: path.join(dir, 'recovery.token') } });
-    tt.after(() => child.kill());
 
     // Wait for the startup poll's warm-up download to land. server.js logs "[apk] mirrored" in the same synchronous
     // block that publishes the file, so any request answered after this line sees the post-download state.
     let log = '';
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('APK never mirrored; supervisor output:\n' + log)), 10000);
-      const onData = (d) => { log += d; if (log.includes('[apk] mirrored')) { clearTimeout(timer); resolve(); } };
+      const onExit = (code) => { clearTimeout(timer); reject(new Error(`supervisor exited (${code}):\n${log}`)); };
+      const onData = (d) => { log += d; if (log.includes('[apk] mirrored')) { clearTimeout(timer); child.off('exit', onExit); resolve(); } };
       child.stdout.on('data', onData);
       child.stderr.on('data', onData);
-      child.on('exit', (code) => { clearTimeout(timer); reject(new Error(`supervisor exited (${code}):\n${log}`)); });
+      child.on('exit', onExit);
     });
 
     const status = await (await fetch(`http://127.0.0.1:${port}/update/status`)).json();
