@@ -103,7 +103,9 @@ enforced by a golden contract test in CI — see [ADR-0009](docs/adr/0009-agent-
 
 ## Dependency updates
 
-Dependabot opens one grouped PR per plane every Monday ([`.github/dependabot.yml`](.github/dependabot.yml)).
+Every Monday Dependabot opens grouped PRs from [`.github/dependabot.yml`](.github/dependabot.yml): one each for
+server Maven, web npm, GitHub Actions, Dockerfile base images and compose images, and two for the agent's Gradle
+deps (`agent-toolchain`, `agent-libs`).
 
 - **T0 green is necessary, not sufficient.** T0 compiles and runs the DB-free tests only. Before merging a group
   that moves a runtime library across a minor/major, run that plane's runtime check too: web —
@@ -111,9 +113,9 @@ Dependabot opens one grouped PR per plane every Monday ([`.github/dependabot.yml
   WAR against Postgres and run `scripts/agent-v1-e2e.sh`; agent — install the APK on a device/emulator and
   complete a check-in.
 - **Known-bad lines are ignored, with a reason.** Each `ignore` in `dependabot.yml` names the migration that lifts
-  it (javax → jakarta / Tomcat 10+, jjwt API port, AGP 9, …). Remove the ignore in that migration's PR — never
-  merge a Dependabot PR that crosses one piecemeal. The `agent-toolchain` group is expected to stay red until the
-  AGP 9 migration.
+  it (javax → jakarta / Tomcat 10+, jjwt API port, AGP 9, Postgres major, …). Remove the ignore in that
+  migration's PR — never merge a Dependabot PR that crosses one piecemeal. The `agent-toolchain` group is expected
+  to stay red until the AGP 9 migration.
 - **Licenses:** a bump that changes a dependency's license (e.g. Liquibase 5 → FSL) is blocked until reviewed
   against [ADR-0008](docs/adr/0008-licensing-and-rebrand.md).
 - **One JDK, one Node line.** The server builds and runs on **JDK 17** (CI, Docker build + `tomcat:9.0-jdk17`

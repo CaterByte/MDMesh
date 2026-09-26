@@ -50,28 +50,22 @@ updates:
       # changed by hand per the Node policy - not to whatever the newest types major is.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
-  - package-ecosystem: npm
-    directory: "/supervisor"
-    schedule: { interval: weekly, day: monday }
-    groups:
-      supervisor-npm: { patterns: ["*"] }
-    open-pull-requests-limit: 3
   - package-ecosystem: gradle
     directory: "/agent-android"
     schedule: { interval: weekly, day: monday }
     groups:
-      # The coupled toolchain train: AGP 9 / Kotlin 2.4 / KSP2 / Hilt 2.60 plus the libraries whose current
-      # releases need it (Kotlin 2.3+ metadata, AGP >= 9.1, compileSdk 37). This PR is expected to stay red
-      # until the agent AGP-9 migration lands; do not merge it piecemeal. First matching group wins.
+      # The coupled toolchain train: AGP 9 / Gradle 9 (wrapper) / Kotlin 2.4 / KSP2 / Hilt 2.60 plus the libraries
+      # whose current releases need it (Kotlin 2.3+ metadata, AGP >= 9.1, compileSdk 37). This PR is expected to
+      # stay red until the agent AGP-9 migration lands; do not merge it piecemeal. First matching group wins.
       agent-toolchain:
         patterns:
+          - "gradle-wrapper"
           - "com.android.application*"
           - "com.android.library*"
           - "org.jetbrains.kotlin*"
           - "com.google.devtools.ksp*"
           - "com.google.dagger*"
           - "androidx.hilt*"
-          - "org.jetbrains.kotlinx*"
           - "androidx.core*"
           - "com.squareup.okhttp3*"
       agent-libs: { patterns: ["*"] }
@@ -86,6 +80,8 @@ updates:
   - package-ecosystem: docker
     directory: "/docker"
     schedule: { interval: weekly, day: monday }
+    groups:
+      docker-images: { patterns: ["*"] }
     ignore:
       # Base images use floating tags, so patch/security rebuilds come from the registry on every image build.
       # A tag change is a platform decision, never a routine bump:
@@ -95,4 +91,16 @@ updates:
       - dependency-name: "maven"
       # Node lines move by hand to the current *LTS* line (Dependabot cannot select LTS-only).
       - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: docker-compose
+    directory: "/"
+    schedule: { interval: weekly, day: monday }
+    groups:
+      compose-images: { patterns: ["*"] }
+    # Scans docker-compose*.yml. Our own ghcr.io/.../mdmesh-* images use ${VAR:-latest} tags and are skipped;
+    # cloudflared is :latest (nothing to bump).
+    ignore:
+      # Postgres stays on 14.x: a new major cannot open an existing 14 data directory (dump/restore or
+      # pg_upgrade). Move it only in a planned database migration.
+      - dependency-name: "postgres"
         update-types: ["version-update:semver-major"]
