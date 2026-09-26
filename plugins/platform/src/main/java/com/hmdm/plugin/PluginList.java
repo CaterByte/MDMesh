@@ -74,7 +74,7 @@ public final class PluginList {
         if (initialized) {
             return;
         }
-        try (ScanResult scanResult = new ClassGraph().enableAllInfo().whitelistPackages("com.hmdm").scan()) {
+        try (ScanResult scanResult = new ClassGraph().enableAllInfo().acceptPackages("com.hmdm").scan()) {
             ClassInfoList pluginConfigClasses = scanResult.getClassesImplementing(PluginConfiguration.class.getName());
             List<String> plugins = pluginConfigClasses.getNames();
 
