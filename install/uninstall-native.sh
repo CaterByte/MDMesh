@@ -32,6 +32,17 @@ for a in "$@"; do
   esac
 done
 
+# svc_user_pids: the pids of $SVC_USER's processes, one per line, leaving out container processes that merely run as the
+# same numeric uid (another PID namespace, but the host's user namespace: only a privileged container runtime sets that
+# up). Same function as in install-native.sh; see the reasoning there.
+svc_user_pids() {
+  local host_pid host_user p
+  host_pid=$(readlink /proc/1/ns/pid) host_user=$(readlink /proc/1/ns/user)
+  for p in $(pgrep -u "$SVC_USER" || true); do
+    [ "$(readlink "/proc/$p/ns/pid")" != "$host_pid" ] && [ "$(readlink "/proc/$p/ns/user")" = "$host_user" ] && continue
+    echo "$p"
+  done
+}
 db_exists() { su -s /bin/sh postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='mdmesh'\"" 2>/dev/null | grep -q 1; }
 counts=""
 if db_exists; then
@@ -121,8 +132,12 @@ fi
 rm -f "$INSTALL_LOG"
 # 6. Service account — only when its files are gone too (a kept files/ dir stays owned by it).
 if [ "$KEEP_DATA" != 1 ] && id -u "$SVC_USER" >/dev/null 2>&1; then
-  pkill -KILL -u "$SVC_USER" 2>/dev/null || true   # userdel refuses while the account has processes
-  for _ in $(seq 1 20); do pgrep -u "$SVC_USER" >/dev/null || break; sleep 0.2; done
+  # userdel refuses while the account has processes (it ignores those in another root, such as a container's).
+  for _ in $(seq 1 20); do
+    pids=$(svc_user_pids); [ -n "$pids" ] || break
+    # shellcheck disable=SC2086  # one pid per word
+    kill -KILL $pids 2>/dev/null || true; sleep 0.2
+  done
   if userdel "$SVC_USER" 2>/dev/null; then echo "  ✓ service user $SVC_USER removed"
   else echo "  ! could not remove the service user $SVC_USER (run: userdel $SVC_USER)"; fi
 fi

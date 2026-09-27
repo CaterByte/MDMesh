@@ -198,18 +198,34 @@ stop_supervisor() {
     fi
   fi
 }
-# Kills every process still running as $SVC_USER and waits until none is left. Stopping the two units does not end a
-# process the account started some other way (a cron or at job, or anything on a host without systemd), and one could
-# race the root writes below. Before the account exists (a fresh install) there is nothing to kill.
+# svc_user_pids: the pids of $SVC_USER's processes, one per line, leaving out container processes that merely run as the
+# same numeric uid (postgres, redis and our own server image run as uid 999, which useradd --system often hands out;
+# `pkill -u` would kill them too). Those are in another PID namespace but still in the host's user namespace, which only
+# a privileged container runtime sets up. A process the account starts is either in the host's PID namespace or, to get
+# a PID namespace of its own without privileges, in a new user namespace too, so it is always listed. (That is why this
+# is not `pgrep --ns 1 --nslist pid`: it would miss such a process.) uninstall-native.sh has the same function.
+svc_user_pids() {
+  local host_pid host_user p
+  host_pid=$(readlink /proc/1/ns/pid) host_user=$(readlink /proc/1/ns/user)
+  for p in $(pgrep -u "$SVC_USER" || true); do
+    [ "$(readlink "/proc/$p/ns/pid")" != "$host_pid" ] && [ "$(readlink "/proc/$p/ns/user")" = "$host_user" ] && continue
+    echo "$p"
+  done
+}
+# Kills every process still running as $SVC_USER (svc_user_pids) and waits until none is left. Stopping the two units
+# does not end a process the account started some other way (a cron or at job, or anything on a host without systemd),
+# and one could race the root writes below. Before the account exists (a fresh install) there is nothing to kill.
 kill_svc_user() {
   id -u "$SVC_USER" >/dev/null 2>&1 || return 0
-  local _
+  local _ pids
   for _ in $(seq 1 50); do
-    pkill -KILL -u "$SVC_USER" 2>/dev/null || true
-    pgrep -u "$SVC_USER" >/dev/null || return 0
+    pids=$(svc_user_pids)
+    [ -n "$pids" ] || return 0
+    # shellcheck disable=SC2086  # one pid per word
+    kill -KILL $pids 2>/dev/null || true
     sleep 0.2
   done
-  _fail "Could not stop every $SVC_USER process (still running: $(pgrep -u "$SVC_USER" | tr '\n' ' ')). Stop them and re-run."
+  _fail "Could not stop every $SVC_USER process (still running: $(svc_user_pids | tr '\n' ' ')). Stop them and re-run."
 }
 # svc_cat FILE: FILE's contents, read as $SVC_USER. For files in the trees that account owns: root would follow a link
 # planted there and read any root-only file. Before the account exists (a fresh install, or an upgrade from a version
