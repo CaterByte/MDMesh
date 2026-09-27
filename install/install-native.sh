@@ -211,6 +211,16 @@ kill_svc_user() {
   done
   _fail "Could not stop every $SVC_USER process (still running: $(pgrep -u "$SVC_USER" | tr '\n' ' ')). Stop them and re-run."
 }
+# svc_cat FILE: FILE's contents, read as $SVC_USER. For files in the trees that account owns: root would follow a link
+# planted there and read any root-only file. Before the account exists (a fresh install, or an upgrade from a version
+# whose Tomcat ran as root) nothing unprivileged owns those trees, so root reads them.
+svc_cat() {
+  if id -u "$SVC_USER" >/dev/null 2>&1; then
+    ( cd / && setpriv --reuid="$SVC_USER" --regid="$SVC_USER" --init-groups cat -- "$1" )
+  else
+    cat -- "$1"
+  fi
+}
 port_holder() {
   if command -v ss >/dev/null 2>&1; then ss -ltnp 2>/dev/null | awk -v p=":$HTTP_PORT$" '$4 ~ p {print; exit}'
   elif command -v lsof >/dev/null 2>&1; then lsof -iTCP:"$HTTP_PORT" -sTCP:LISTEN -nP 2>/dev/null | awk 'NR==2{print; exit}'; fi
@@ -260,8 +270,14 @@ stop_tomcat() {
 # it would silently break every already-enrolled device; reuse the value from the existing ROOT.xml.
 # (DB_PASSWORD is different: it is re-applied to the role via ALTER USER below, so a fresh one is fine.)
 _old_root="$CATALINA/conf/Catalina/localhost/ROOT.xml"
+# It is read as $SVC_USER (svc_cat), whose tree $CATALINA is. If that account cannot read it (a link to a root-only file,
+# or a root-owned leftover), stop: carrying on would silently rotate the secrets enrolled devices depend on.
+_old_xml=
+if [ -f "$_old_root" ]; then
+  _old_xml=$(svc_cat "$_old_root" 2>>"$LOGFILE") || _fail "Could not read $_old_root as $SVC_USER. It holds hash.secret, which enrolled devices depend on: if it is a symbolic link, remove it; if root owns it, chown it to $SVC_USER. Then re-run."
+fi
 # Value of <Parameter name="$1" value="…"/> in the existing ROOT.xml; empty when there is none.
-old_root_param() { [ -f "$_old_root" ] || return 0; sed -n "s/.*name=\"$1\"[[:space:]]*value=\"\([^\"]*\)\".*/\1/p" "$_old_root" | head -n 1; }
+old_root_param() { printf '%s\n' "$_old_xml" | sed -n "s/.*name=\"$1\"[[:space:]]*value=\"\([^\"]*\)\".*/\1/p" | head -n 1; }
 _old_secret=$(old_root_param hash.secret)
 if [ -n "$_old_secret" ]; then HASH_SECRET="$_old_secret"; info "Reusing hash.secret from the existing install (enrolled devices keep working)"; fi
 # jwt.secretkey signs REST API clients' JWTs (/rest/public/jwt/login), so it is kept the same way: those tokens then
@@ -726,10 +742,11 @@ if ! _migrate_wait; then
   printf '    %s(full logs: journalctl -u %s  /  %s/logs/)%s\n' "$c_dim" "$SVC_UNIT" "$CATALINA" "$c_reset"; hr
   exit 1
 fi
-# The marker carries "OK" or the initialization error text — refuse to seed on an errored boot.
-if ! grep -q '^OK' "$INIT_MARKER"; then
+# The marker carries "OK" or the initialization error text — refuse to seed on an errored boot. It is read as $SVC_USER
+# (svc_cat): $BASE_DIR is that account's tree, and root would print any root-only file a link planted there points at.
+if ! grep -q '^OK' < <(svc_cat "$INIT_MARKER" 2>/dev/null); then
   printf '  %s✗ the server reported an initialization error:%s\n' "$c_red" "$c_reset"
-  hr; head -c 2000 "$INIT_MARKER" | sed "s/^/    ${c_dim}/;s/$/${c_reset}/"; echo; hr; exit 1
+  hr; head -c 2000 < <(svc_cat "$INIT_MARKER" 2>/dev/null) | sed "s/^/    ${c_dim}/;s/$/${c_reset}/"; echo; hr; exit 1
 fi
 ok "database schema ready"
 
