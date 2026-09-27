@@ -147,7 +147,8 @@ SVC_UNIT=mdmesh-server     # systemd unit that owns Tomcat
 # planted there must never be followed. tc_guard REL refuses (fails the install) when $CATALINA or any component of
 # $CATALINA/REL is a symbolic link. tc_write REL CMD... guards REL, runs CMD with its stdout going to a fresh mode-600
 # file (mktemp) in REL's directory, and renames that over REL in one step (mv -fT never follows a link or descends
-# into a directory there). Tomcat is stopped before these run, so no $SVC_USER process can race them.
+# into a directory there). Temp files a killed run left behind are removed first (ROOT.xml's hold its secrets). Tomcat
+# is stopped before these run, so no $SVC_USER process can race them.
 tc_guard() {
   local p="$CATALINA" part
   local -a parts
@@ -163,6 +164,7 @@ tc_write() {
   shift
   tc_guard "$rel"
   mkdir -p "$(dirname "$CATALINA/$rel")"
+  rm -f "$CATALINA/$rel".??????
   tmp=$(mktemp "$CATALINA/$rel.XXXXXX")
   if "$@" > "$tmp" && chmod 600 "$tmp" && mv -fT "$tmp" "$CATALINA/$rel"; then return 0; fi
   rm -f "$tmp"
@@ -226,9 +228,11 @@ if [ -n "$_old_secret" ]; then HASH_SECRET="$_old_secret"; info "Reusing hash.se
 # survive restarts and upgrades, and an install from before it existed gets the key generated above. JJWT 0.9.1
 # base64-decodes the key and silently drops characters outside the base64 alphabet and a trailing partial 4-character
 # group, so only hex, a multiple of 4 characters and at least 128 long (what we generate) is reused; anything else
-# (a hand edit) is replaced. docker/entrypoint.sh applies the same rule to JWT_SECRET.
+# (a hand edit) is replaced. Whitespace is not part of the key (the XML parser turns a tab or newline in the value into
+# a space, which the JWT library drops), so a hand edit that added some is not a reason to rotate it. docker/entrypoint.sh
+# applies the same rules to JWT_SECRET and its key file.
 jwt_key_ok() { case "$1" in ''|*[!0-9a-fA-F]*) return 1 ;; esac; [ "${#1}" -ge 128 ] && [ $(( ${#1} % 4 )) -eq 0 ]; }
-_old_jwt=$(old_root_param jwt.secretkey)
+_old_jwt=$(old_root_param jwt.secretkey | tr -d '[:space:]')
 if jwt_key_ok "$_old_jwt"; then JWT_SECRET="$_old_jwt"; info "Reusing jwt.secretkey from the existing install (API clients stay signed in)"
 elif [ -n "$_old_jwt" ]; then info "Replacing the existing jwt.secretkey: it is not hex, a multiple of 4 and at least 128 characters (the JWT library would drop characters)"; fi
 

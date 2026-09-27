@@ -35,6 +35,8 @@ jwt_secret_ok() {
   case "$1" in '' | *[!0-9a-fA-F]*) return 1 ;; esac
   [ "${#1}" -ge 128 ] && [ $(( ${#1} % 4 )) -eq 0 ]
 }
+# Temp key files (mktemp below) of a start that was killed before publishing its key hold a key: remove them first.
+rm -f "$JWT_SECRET_FILE".??????
 if [ -n "$JWT_SECRET" ]; then
   if ! jwt_secret_ok "$JWT_SECRET"; then
     echo "JWT_SECRET must be hex, a multiple of 4 characters and at least 128 long (the JWT library would silently drop anything else). Generate one with: openssl rand -hex 64 (or unset JWT_SECRET to use the key kept in $JWT_SECRET_FILE)" >&2
@@ -43,8 +45,8 @@ if [ -n "$JWT_SECRET" ]; then
 else
   # This runs as root in a directory the server user owns: never follow a link there (chmod/read would act on its target).
   [ -L "$JWT_SECRET_FILE" ] && rm -f "$JWT_SECRET_FILE"
-  # Whitespace/CR are not part of a key (a hand-pinned file saved with CRLF must not be rotated).
-  [ -f "$JWT_SECRET_FILE" ] && JWT_SECRET=$(tr -d ' \r\n' < "$JWT_SECRET_FILE")
+  # Whitespace is not part of a key (a hand-pinned file saved with CRLF or a stray tab must not be rotated).
+  [ -f "$JWT_SECRET_FILE" ] && JWT_SECRET=$(tr -d '[:space:]' < "$JWT_SECRET_FILE")
   if ! jwt_secret_ok "$JWT_SECRET"; then
     if [ -e "$JWT_SECRET_FILE" ]; then
       echo "WARNING: $JWT_SECRET_FILE does not hold a valid key; replacing it (REST API clients sign in again once)." >&2
@@ -54,13 +56,16 @@ else
     jwt_secret_ok "$_jwt_new" || { echo "Could not generate a JWT signing key from /dev/urandom." >&2; exit 1; }
     # mktemp: a fresh, unique mode-600 file (O_EXCL, so a planted name or link is never written through). ln publishes
     # it only if no key exists yet, so concurrent first starts converge on the first writer's key; mv is the fallback
-    # for a volume without hard links. The chown -R below hands the file to the server user.
+    # for a volume without hard links. The chown -R below hands the file to the server user. The trap removes the temp
+    # file if this start fails before it is published.
     _jwt_tmp=$(mktemp "$JWT_SECRET_FILE.XXXXXX")
+    trap 'rm -f "$_jwt_tmp"' EXIT
     printf '%s\n' "$_jwt_new" > "$_jwt_tmp"
     ln "$_jwt_tmp" "$JWT_SECRET_FILE" 2>/dev/null || [ -e "$JWT_SECRET_FILE" ] || mv -f "$_jwt_tmp" "$JWT_SECRET_FILE"
     rm -f "$_jwt_tmp"
+    trap - EXIT
     # Use what the file holds (possibly another start's key), so this process always matches the file.
-    JWT_SECRET=$(tr -d ' \r\n' < "$JWT_SECRET_FILE")
+    JWT_SECRET=$(tr -d '[:space:]' < "$JWT_SECRET_FILE")
     jwt_secret_ok "$JWT_SECRET" || { echo "$JWT_SECRET_FILE does not hold a valid key after writing it." >&2; exit 1; }
   fi
   chmod 600 "$JWT_SECRET_FILE"
