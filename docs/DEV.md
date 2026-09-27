@@ -50,6 +50,10 @@ docker compose --env-file docker/dev.env down                        # stop; kee
 docker compose --env-file docker/dev.env down -v                     # reset: also deletes the dev database and files
 ```
 
+The server logs to stdout at INFO, from `server/src/main/resources/log4j.xml` (its only log config). For DEBUG while
+you work, raise a level there locally and use the fast Java loop below. Do not commit it: `LoggingConfigTest` (the
+server tests, which T0 runs) fails if the root or `AuditLogger` level is not INFO.
+
 `down -v` deletes the server's data volume too (`/opt/mdmesh`: uploaded files and the JWT signing key in
 `jwt.secret`), so the next start generates a new key. With `--env-file docker/dev.env`, `down -v` only ever deletes the
 `mdmesh-dev` project's volumes. Do not run the dev stack in a checkout that also runs a real install (`./setup.sh`

@@ -193,6 +193,28 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
 - Older agents keep working across server updates (versioned `/agent/v1` contract; see
   `docs/adr/0009-agent-v1-contract-stability.md`).
 
+## Server logs
+
+The server logs to stdout only, at INFO: read it with `docker compose logs -f server` (Docker) or
+`journalctl -u mdmesh-server -f` (native). Audit events (sign-ins, password changes, edits to devices, configurations,
+applications and groups) are the lines of the `AuditLogger` logger, for example
+`docker compose logs server | grep AuditLogger`; the audit plugin also stores them in the `plugin_audit_log` table.
+Tomcat also writes its own files (`catalina.<date>.log`, which repeats its console lines and the database migrations,
+and the HTTP access log) under `/usr/local/tomcat/logs` in the container and `/opt/mdmesh-tc/logs` on native installs.
+
+Docker's default `json-file` log driver keeps container logs without a size limit. To cap them, set `log-opts` in
+`/etc/docker/daemon.json` (for example `"log-opts": {"max-size": "10m", "max-file": "5"}`) and recreate the
+containers. journald caps the journal on its own.
+
+An install upgraded from v0.3.x keeps `/opt/mdmesh/log4j-mdmesh.xml` (and `/opt/mdmesh/logs/`, if a development build
+created it). The server no longer reads or writes them; delete them if you like.
+
+For a temporary DEBUG log, save a log4j 1.2 XML config where the server can read it, for example
+`/opt/mdmesh/log4j-debug.xml`, and pass `JAVA_OPTS=-Dlog4j.configuration=file:///opt/mdmesh/log4j-debug.xml` to the
+server: on Docker in the `server` service's `environment:`, on native with `systemctl edit mdmesh-server` (add
+`Environment=JAVA_OPTS=...` under `[Service]`). Restart the server, and remove it again afterwards: DEBUG logs every
+SQL statement.
+
 ## Health checks
 
 Docker installs answer two unauthenticated probes at the edge, for uptime monitors. Each returns `200 ok` or a
