@@ -290,8 +290,8 @@ docker compose $COMPOSE_ARGS up -d --build
 say "Waiting for the server to finish first-boot (Liquibase)…"
 BOOTED=0
 for _ in $(seq 1 60); do
+  sleep 5   # first: `up -d` can return before the entrypoint has removed the previous start's marker
   if docker compose exec -T server test -s /opt/mdmesh/initialized.txt 2>/dev/null; then BOOTED=1; break; fi
-  sleep 5
 done
 if [ "$BOOTED" != 1 ]; then
   # Hard-fail rather than seed a half-migrated database: everything after this point assumes the
