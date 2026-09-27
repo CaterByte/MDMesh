@@ -106,6 +106,7 @@ cat <<WARN
     • create or alter a PostgreSQL role and database "mdmesh" (resets that role's password)
     • download and unpack Apache Tomcat 9 into /opt/mdmesh-tc (clears its webapps/)
     • write config and uploaded files under /opt/mdmesh (the server logs to the systemd journal)
+    • write the updater's settings to /etc/mdmesh/supervisor.env
     • start Tomcat, run database migrations, and seed the admin account
 
   Intended for a dedicated server you control. This script does not undo these changes.
@@ -143,13 +144,19 @@ TOMCAT_VER=9.0.89
 export CATALINA_PID="$CATALINA/tomcat.pid"
 SVC_USER=mdmesh            # unprivileged account Tomcat runs as (mirrors the Docker image)
 SVC_UNIT=mdmesh-server     # systemd unit that owns Tomcat
+SUP_UNIT=mdmesh-supervisor # systemd unit that owns the updater supervisor (also runs as $SVC_USER)
+# The supervisor's settings (GITHUB_TOKEN included). They live outside $BASE_DIR on purpose: systemd reads an
+# EnvironmentFile as root and follows links, so one inside the service user's tree would let that user point it at any
+# root-only KEY=VALUE file and receive its contents in the supervisor's environment.
+SUP_ENV_DIR=/etc/mdmesh
 # Root writes into $CATALINA and $BASE_DIR, which this script chowns to $SVC_USER (on this run and on every earlier one),
 # so a link planted there must never be followed. guard_under ROOT REL refuses (fails the install) when ROOT or any
 # component of ROOT/REL is a symbolic link. write_under ROOT REL CMD... guards REL, runs CMD with its stdout going to a
 # fresh mode-600 file (mktemp) in REL's directory, and renames that over REL in one step (mv -fT never follows a link or
 # descends into a directory there). Temp files a killed run left behind are removed first (ROOT.xml's hold its
-# secrets). tc_guard/tc_write REL and base_guard/base_write REL are these for $CATALINA and $BASE_DIR. Tomcat is stopped
-# before these run, so no $SVC_USER process can race them.
+# secrets). tc_guard/tc_write REL and base_guard/base_write REL are these for $CATALINA and $BASE_DIR. Tomcat and the
+# supervisor (both run as $SVC_USER) are stopped before these run and started after the last one, so no $SVC_USER process
+# can race them.
 guard_under() {
   local root="$1" p="$1" part
   local -a parts
@@ -176,6 +183,12 @@ tc_write()   { local rel="$1"; shift; write_under "$CATALINA" "$rel" "$@"; }
 base_guard() { guard_under "$BASE_DIR" "$1"; }
 base_write() { local rel="$1"; shift; write_under "$BASE_DIR" "$rel" "$@"; }
 have_systemd() { command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; }
+# Stops the supervisor unit if it exists (older installs ran it as root; either way it must not run during root writes).
+stop_supervisor() {
+  if have_systemd && systemctl list-unit-files 2>/dev/null | grep -q "^${SUP_UNIT}\.service"; then
+    systemctl stop "$SUP_UNIT" >/dev/null 2>&1 || true
+  fi
+}
 port_holder() {
   if command -v ss >/dev/null 2>&1; then ss -ltnp 2>/dev/null | awk -v p=":$HTTP_PORT$" '$4 ~ p {print; exit}'
   elif command -v lsof >/dev/null 2>&1; then lsof -iTCP:"$HTTP_PORT" -sTCP:LISTEN -nP 2>/dev/null | awk 'NR==2{print; exit}'; fi
@@ -413,8 +426,10 @@ run "npm ci + vite build (web/)" bash -c 'cd web && npm ci --no-audit --no-fund 
 
 step "Tomcat 9 + app deploy"
 # Stop the previous instance first: dropping a new ROOT.war into a running Tomcat triggers a hot redeploy
-# against the old context parameters (and the DB password we just rotated).
+# against the old context parameters (and the DB password we just rotated). The supervisor is stopped too: from here
+# until it is started again below, root writes into $BASE_DIR, which the supervisor's account owns.
 stop_tomcat
+stop_supervisor
 # Install Tomcat if it's missing OR a previous run left it partial/corrupt. Check for the actual launcher
 # script, not just the directory, so a broken /opt/mdmesh-tc self-heals instead of failing at startup.
 # archive.apache.org keeps every release permanently, so the pinned version URL never rots.
@@ -501,68 +516,6 @@ fi
 chown -R "$SVC_USER:$SVC_USER" "$CATALINA" "$BASE_DIR"
 ok "server + console deployed (console at /, API at /rest); ROOT.xml written; owned by $SVC_USER"
 
-step "Updater supervisor (release polling + verified agent-APK mirror)"
-# The same supervisor the Docker stack runs, as a systemd unit on loopback :9000. It polls GitHub
-# Releases, minisign-verifies the manifest, keeps /files/agent.apk fresh (verified releases only)
-# and powers Settings→Updates + staged agent rollouts in the console (via the /update/* passthrough
-# servlet). APPLY_SUPPORTED=0: native installs update server/console by re-running this installer,
-# so the self-apply/rollback routes are disabled — the console shows the manual steps instead.
-SUP_DIR="$BASE_DIR/supervisor"
-for _f in server.js lib.js recovery.html; do base_write "supervisor/$_f" cat "$REPO/supervisor/$_f"; done
-base_write supervisor/minisign.pub cat "$REPO/release/minisign.pub"
-# The running version: the checkout's latest release tag (source installs track the repo). The
-# supervisor compares it against GitHub's latest to decide "update available". Same rule as setup.sh
-# (install/lib/version.sh).
-CURRENT_VERSION=$(mdm_repo_version "$REPO")
-base_write supervisor.env cat <<ENV
-SUPERVISOR_PORT=9000
-SUPERVISOR_BIND=127.0.0.1
-GITHUB_REPO=${GITHUB_REPO}
-GITHUB_TOKEN=${GITHUB_TOKEN:-}
-UPDATE_CHANNEL=stable
-POLL_INTERVAL_HOURS=6
-CURRENT_VERSION=${CURRENT_VERSION:-0.0.0}
-MANIFEST_PUBKEY=${SUP_DIR}/minisign.pub
-APK_CACHE_DIR=${SUP_DIR}/apk
-AUTO_FILE=${SUP_DIR}/auto.json
-RECOVERY_TOKEN_FILE=${SUP_DIR}/recovery.token
-PUBLISH_APK_TO=${BASE_DIR}/files/agent.apk
-SERVER_BASE=http://127.0.0.1:${HTTP_PORT}
-APPLY_SUPPORTED=0
-ENV
-if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
-  cat > /etc/systemd/system/mdmesh-supervisor.service <<UNIT
-[Unit]
-Description=MDMesh updater supervisor (release polling + verified agent-APK mirror)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-EnvironmentFile=${BASE_DIR}/supervisor.env
-ExecStart=$(command -v node) ${SUP_DIR}/server.js
-Restart=always
-RestartSec=5
-NoNewPrivileges=true
-ProtectSystem=full
-ReadWritePaths=${BASE_DIR}
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-  systemctl daemon-reload >> "$LOGFILE" 2>&1
-  # enable + RESTART (not enable --now, which is a no-op on an already-running unit): re-runs
-  # rewrite supervisor.env — notably CURRENT_VERSION — and a stale process would keep reporting
-  # the pre-upgrade version, leaving the console's "update available" banner stuck forever.
-  systemctl enable mdmesh-supervisor >> "$LOGFILE" 2>&1
-  systemctl restart mdmesh-supervisor >> "$LOGFILE" 2>&1 \
-    && ok "supervisor running v${CURRENT_VERSION:-0.0.0} (systemd unit mdmesh-supervisor, loopback :9000)" \
-    || info "supervisor unit failed to start — check: journalctl -u mdmesh-supervisor"
-else
-  info "no systemd — start the supervisor manually:"
-  info "  (set -a; . ${BASE_DIR}/supervisor.env; node ${SUP_DIR}/server.js &)"
-fi
-
 if [ "$SEED" = no ]; then
   step "Backing up the database before upgrading"
   # Liquibase migrations run against live data on the next start; keep a restorable dump first.
@@ -579,6 +532,81 @@ if [ "$SEED" = no ]; then
     rm -f "$_bk_tmp"
     printf '  %s✗ pg_dump failed — not upgrading without a backup. See %s%s\n' "$c_red" "$LOGFILE" "$c_reset"; exit 1
   fi
+fi
+
+step "Updater supervisor (release polling + verified agent-APK mirror)"
+# The same supervisor the Docker stack runs, as a systemd unit on loopback :9000. It polls GitHub
+# Releases, minisign-verifies the manifest, keeps /files/agent.apk fresh (verified releases only)
+# and powers Settings→Updates + staged agent rollouts in the console (via the /update/* passthrough
+# servlet). APPLY_SUPPORTED=0: native installs update server/console by re-running this installer,
+# so the self-apply/rollback routes are disabled — the console shows the manual steps instead.
+# It runs as $SVC_USER, like Tomcat: it has no job that needs root here, and its code and state live in $SVC_USER's
+# tree. So $SUP_DIR is handed to $SVC_USER after the writes below (on a fresh install base_write creates it as root;
+# on an upgrade it may hold root-owned apk/, auto.json or recovery.token from when the supervisor ran as root).
+SUP_DIR="$BASE_DIR/supervisor"
+for _f in server.js lib.js recovery.html; do base_write "supervisor/$_f" cat "$REPO/supervisor/$_f"; done
+base_write supervisor/minisign.pub cat "$REPO/release/minisign.pub"
+chown -R "$SVC_USER:$SVC_USER" "$SUP_DIR"
+# The running version: the checkout's latest release tag (source installs track the repo). The
+# supervisor compares it against GitHub's latest to decide "update available". Same rule as setup.sh
+# (install/lib/version.sh).
+CURRENT_VERSION=$(mdm_repo_version "$REPO")
+# Settings go to $SUP_ENV_DIR (root-owned; see its definition). Earlier versions kept them in $BASE_DIR/supervisor.env.
+rm -f "$BASE_DIR/supervisor.env"
+write_under "$SUP_ENV_DIR" supervisor.env cat <<ENV
+SUPERVISOR_PORT=9000
+SUPERVISOR_BIND=127.0.0.1
+GITHUB_REPO=${GITHUB_REPO}
+GITHUB_TOKEN=${GITHUB_TOKEN:-}
+UPDATE_CHANNEL=stable
+POLL_INTERVAL_HOURS=6
+CURRENT_VERSION=${CURRENT_VERSION:-0.0.0}
+MANIFEST_PUBKEY=${SUP_DIR}/minisign.pub
+APK_CACHE_DIR=${SUP_DIR}/apk
+AUTO_FILE=${SUP_DIR}/auto.json
+RECOVERY_TOKEN_FILE=${SUP_DIR}/recovery.token
+PUBLISH_APK_TO=${BASE_DIR}/files/agent.apk
+SERVER_BASE=http://127.0.0.1:${HTTP_PORT}
+APPLY_SUPPORTED=0
+ENV
+NODE_BIN=$(command -v node)
+# Node installed under a private home (nvm in /root, say) is not executable by $SVC_USER, and the unit would only
+# restart-loop quietly (systemctl restart still reports success for Type=simple), so say so here.
+( cd / && setpriv --reuid="$SVC_USER" --regid="$SVC_USER" --init-groups "$NODE_BIN" -e '' ) >> "$LOGFILE" 2>&1 \
+  || info "the $SVC_USER user cannot run $NODE_BIN, so the supervisor will not start: install Node system-wide and re-run"
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+  cat > "/etc/systemd/system/${SUP_UNIT}.service" <<UNIT
+[Unit]
+Description=MDMesh updater supervisor (release polling + verified agent-APK mirror)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${SVC_USER}
+Group=${SVC_USER}
+EnvironmentFile=${SUP_ENV_DIR}/supervisor.env
+ExecStart=${NODE_BIN} ${SUP_DIR}/server.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=${BASE_DIR}
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  systemctl daemon-reload >> "$LOGFILE" 2>&1
+  # enable + RESTART (not enable --now, which is a no-op on an already-running unit): re-runs
+  # rewrite supervisor.env — notably CURRENT_VERSION — and a stale process would keep reporting
+  # the pre-upgrade version, leaving the console's "update available" banner stuck forever.
+  systemctl enable "$SUP_UNIT" >> "$LOGFILE" 2>&1
+  systemctl restart "$SUP_UNIT" >> "$LOGFILE" 2>&1 \
+    && ok "supervisor running v${CURRENT_VERSION:-0.0.0} as $SVC_USER (systemd unit ${SUP_UNIT}, loopback :9000)" \
+    || info "supervisor unit failed to start — check: journalctl -u ${SUP_UNIT}"
+else
+  info "no systemd — start the supervisor manually, as $SVC_USER (never as root):"
+  info "  (set -a; . ${SUP_ENV_DIR}/supervisor.env; setpriv --reuid=$SVC_USER --regid=$SVC_USER --init-groups $NODE_BIN ${SUP_DIR}/server.js &)"
 fi
 
 step "Starting the server"

@@ -5,8 +5,9 @@
 #   sudo ./install/uninstall-native.sh --keep-data  # remove code/services but keep the database + uploaded files
 #   sudo ./install/uninstall-native.sh -y           # unattended (still takes a final pg_dump unless --no-backup)
 #
-# Removes: Tomcat (/opt/mdmesh-tc), the app dir (/opt/mdmesh), the mdmesh-supervisor systemd unit, the install
-# log, and — unless --keep-data — the PostgreSQL database + role "mdmesh". A final dump is written first.
+# Removes: Tomcat (/opt/mdmesh-tc), the app dir (/opt/mdmesh), the mdmesh-supervisor systemd unit and its settings
+# (/etc/mdmesh), the install log, and — unless --keep-data — the PostgreSQL database + role "mdmesh". A final dump is
+# written first.
 # Leaves alone: apt packages (postgresql, maven, node, …), your reverse proxy/TLS, and the git checkout.
 set -euo pipefail
 umask 077
@@ -16,6 +17,7 @@ export PATH="/usr/sbin:/sbin:$PATH"   # useradd/userdel/pg tools live here; not 
 BASE_DIR=/opt/mdmesh
 CATALINA=/opt/mdmesh-tc
 UNIT=/etc/systemd/system/mdmesh-supervisor.service
+SUP_ENV_DIR=/etc/mdmesh   # the supervisor's settings (install-native.sh)
 SERVER_UNIT=/etc/systemd/system/mdmesh-server.service
 SVC_USER=mdmesh
 INSTALL_LOG=/var/log/mdmesh-install.log
@@ -25,7 +27,7 @@ for a in "$@"; do
     --keep-data) KEEP_DATA=1 ;;
     -y|--yes)    YES=1 ;;
     --no-backup) BACKUP=0 ;;
-    -h|--help)   sed -n '2,11p' "$0"; exit 0 ;;
+    -h|--help)   sed -n '2,12p' "$0"; exit 0 ;;
     *) echo "Unknown flag: $a (see --help)"; exit 1 ;;
   esac
 done
@@ -42,6 +44,7 @@ echo "  MDMesh native uninstall — this host will lose:"
 [ -f "$SERVER_UNIT" ] && echo "    • server service:             mdmesh-server (systemd unit removed)"
 id -u "$SVC_USER" >/dev/null 2>&1 && [ "$KEEP_DATA" != 1 ] && echo "    • service user:               $SVC_USER"
 [ -f "$UNIT" ]     && echo "    • updater service:            mdmesh-supervisor (systemd unit removed)"
+[ -d "$SUP_ENV_DIR" ] && echo "    • updater settings:           $SUP_ENV_DIR"
 if [ "$KEEP_DATA" = 1 ]; then
   [ -d "$BASE_DIR" ] && echo "    • app dir (KEEPING files/ and backups/): $BASE_DIR"
   [ -n "$counts" ]   && echo "    • database:                   KEPT ($counts)"
@@ -85,6 +88,10 @@ if [ -f "$UNIT" ] || systemctl list-unit-files 2>/dev/null | grep -q '^mdmesh-su
   systemctl disable --now mdmesh-supervisor >/dev/null 2>&1 || true
   rm -f "$UNIT"; systemctl daemon-reload 2>/dev/null || true
   echo "  ✓ mdmesh-supervisor service removed"
+fi
+if [ -d "$SUP_ENV_DIR" ]; then
+  rm -f "$SUP_ENV_DIR/supervisor.env"; rmdir "$SUP_ENV_DIR" 2>/dev/null || true
+  echo "  ✓ removed $SUP_ENV_DIR/supervisor.env"
 fi
 
 # 4. Database.
