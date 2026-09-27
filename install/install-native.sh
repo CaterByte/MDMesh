@@ -155,8 +155,8 @@ SUP_ENV_DIR=/etc/mdmesh
 # fresh mode-600 file (mktemp) in REL's directory, and renames that over REL in one step (mv -fT never follows a link or
 # descends into a directory there). Temp files a killed run left behind are removed first (ROOT.xml's hold its
 # secrets). tc_guard/tc_write REL and base_guard/base_write REL are these for $CATALINA and $BASE_DIR. Tomcat and the
-# supervisor (both run as $SVC_USER) are stopped before these run and started after the last one, so no $SVC_USER process
-# can race them.
+# supervisor (both run as $SVC_USER) are stopped, and every other $SVC_USER process killed (kill_svc_user), before these
+# run; the two are started after the last one, so no $SVC_USER process can race them.
 guard_under() {
   local root="$1" p="$1" part
   local -a parts
@@ -197,6 +197,19 @@ stop_supervisor() {
       systemctl disable "$SUP_UNIT" >> "$LOGFILE" 2>&1 || _fail "Could not disable the old ${SUP_UNIT} unit (it runs as root)"
     fi
   fi
+}
+# Kills every process still running as $SVC_USER and waits until none is left. Stopping the two units does not end a
+# process the account started some other way (a cron or at job, or anything on a host without systemd), and one could
+# race the root writes below. Before the account exists (a fresh install) there is nothing to kill.
+kill_svc_user() {
+  id -u "$SVC_USER" >/dev/null 2>&1 || return 0
+  local _
+  for _ in $(seq 1 50); do
+    pkill -KILL -u "$SVC_USER" 2>/dev/null || true
+    pgrep -u "$SVC_USER" >/dev/null || return 0
+    sleep 0.2
+  done
+  _fail "Could not stop every $SVC_USER process (still running: $(pgrep -u "$SVC_USER" | tr '\n' ' ')). Stop them and re-run."
 }
 port_holder() {
   if command -v ss >/dev/null 2>&1; then ss -ltnp 2>/dev/null | awk -v p=":$HTTP_PORT$" '$4 ~ p {print; exit}'
@@ -435,10 +448,12 @@ run "npm ci + vite build (web/)" bash -c 'cd web && npm ci --no-audit --no-fund 
 
 step "Tomcat 9 + app deploy"
 # Stop the previous instance first: dropping a new ROOT.war into a running Tomcat triggers a hot redeploy
-# against the old context parameters (and the DB password we just rotated). The supervisor is stopped too: from here
-# until it is started again below, root writes into $BASE_DIR, which the supervisor's account owns.
+# against the old context parameters (and the DB password we just rotated). The supervisor is stopped too, and then any
+# other $SVC_USER process is killed: from here until the supervisor is started again below, root writes into $CATALINA
+# and $BASE_DIR, which that account owns.
 stop_tomcat
 stop_supervisor
+kill_svc_user
 # Install Tomcat if it's missing OR a previous run left it partial/corrupt. Check for the actual launcher
 # script, not just the directory, so a broken /opt/mdmesh-tc self-heals instead of failing at startup.
 # archive.apache.org keeps every release permanently, so the pinned version URL never rots.
