@@ -49,6 +49,7 @@ services:
       SMTP_FROM: ${SMTP_FROM:-mdm@localhost}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      JAVA_OPTS: ${JAVA_OPTS:-}   # optional JVM flags, e.g. a temporary DEBUG log config (DEPLOY.md "Server logs")
     volumes:
       - mdmeshdata:/opt/mdmesh
 

@@ -209,11 +209,14 @@ containers. journald caps the journal on its own.
 An install upgraded from v0.3.x keeps `/opt/mdmesh/log4j-mdmesh.xml` (and `/opt/mdmesh/logs/`, if a development build
 created it). The server no longer reads or writes them; delete them if you like.
 
-For a temporary DEBUG log, save a log4j 1.2 XML config where the server can read it, for example
-`/opt/mdmesh/log4j-debug.xml`, and pass `JAVA_OPTS=-Dlog4j.configuration=file:///opt/mdmesh/log4j-debug.xml` to the
-server: on Docker in the `server` service's `environment:`, on native with `systemctl edit mdmesh-server` (add
-`Environment=JAVA_OPTS=...` under `[Service]`). Restart the server, and remove it again afterwards: DEBUG logs every
-SQL statement.
+For a temporary DEBUG log, put a log4j 1.2 XML config at `/opt/mdmesh/log4j-debug.xml` and start the server with
+`JAVA_OPTS=-Dlog4j.configuration=file:///opt/mdmesh/log4j-debug.xml`:
+- Docker: `docker compose cp log4j-debug.xml server:/opt/mdmesh/`, add that `JAVA_OPTS=...` line to `.env`, then
+  `docker compose up -d server`.
+- Native: copy the file there (readable by the `mdmesh` user), run `systemctl edit mdmesh-server`, add
+  `Environment=JAVA_OPTS=...` under `[Service]`, then `systemctl restart mdmesh-server`.
+
+Undo it the same way afterwards: DEBUG logs every SQL statement.
 
 ## Health checks
 
