@@ -127,8 +127,8 @@ docker image rm $(docker image ls 'ghcr.io/mdmesh-app/mdmesh-*' -q) 2>/dev/null 
 `docker compose down` without `-v` keeps the data volumes, so a later `./setup.sh` picks up where you left off.
 
 **Native.** `sudo ./install/uninstall-native.sh` shows exactly what it will remove (Tomcat under `/opt/mdmesh-tc`,
-the app dir `/opt/mdmesh`, the `mdmesh-server` and `mdmesh-supervisor` units, the `mdmesh` system user, the install
-log, and the `mdmesh` database + role),
+the app dir `/opt/mdmesh`, the `mdmesh-server` and `mdmesh-supervisor` units and the supervisor's settings in
+`/etc/mdmesh`, the `mdmesh` system user, the install log, and the `mdmesh` database + role),
 writes a final `pg_dump` to `/root`, and only proceeds when you type `UNINSTALL`. `--keep-data` removes the code
 and services but leaves the database, `/opt/mdmesh/files` and `/opt/mdmesh/backups` in place; `-y` skips the
 prompt for scripted use. Packages installed by apt, your reverse proxy and the git checkout are never touched.
@@ -271,3 +271,5 @@ which listens on loopback `:9000` only, on the host with `curl -fsS 127.0.0.1:90
 - The supervisor mounts the Docker socket (to drive updates) and is trusted: it acts only on
   **minisign-verified** manifests and **authorized** callers (admin session, or the recovery token).
   Apply/rollback only ever recreate `server`/`caddy` — never `postgres` or the supervisor itself.
+- On native installs the supervisor runs as the unprivileged `mdmesh` user (like Tomcat), with its settings in the
+  root-owned `/etc/mdmesh/supervisor.env`. A `GITHUB_TOKEN` there is readable by that user, so use a read-only token.
