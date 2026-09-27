@@ -46,6 +46,11 @@ trim_trailing_whitespace = false
 [Caddyfile]
 indent_style = tab
 
+# Contract goldens are compared byte for byte (the .sha256 pins the .json's exact bytes); saving must not change them.
+[common/src/test/resources/contract/**]
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+
 # Windows batch files keep their line endings.
 [*.bat]
 end_of_line = unset
