@@ -400,13 +400,15 @@ ok "$(javac -version 2>&1) — $JAVA_HOME"
 step "Database"
 # Idempotent: every run generates a fresh DB_PASSWORD, so ALWAYS set the role's password to match — ALTER
 # if the role already exists from a previous run, else CREATE — so ROOT.xml + seeding always authenticate.
-# NB: the password is inlined into the SQL text, so a psql error here could echo the whole statement
-# (password included) into $LOGFILE — acceptable because the log is chmod 600 / owner-only (above).
+# The password reaches psql on stdin as a psql variable (:'pw' quotes it as an SQL literal), never on its command line,
+# which every local user can read (ps, /proc/<pid>/cmdline) and sudo logs. A psql error here can still echo the
+# statement (password included) into $LOGFILE, which is owner-only (above).
+role_password_sql() { printf '%s\n' "\\set pw $(_mdm_psql_arg "$DB_PASSWORD")" "$1 USER mdmesh WITH PASSWORD :'pw';"; }
 {
   if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='mdmesh'" | grep -q 1; then
-    sudo -u postgres psql -c "ALTER USER mdmesh WITH PASSWORD '${DB_PASSWORD}';"
+    role_password_sql ALTER | sudo -u postgres psql -v ON_ERROR_STOP=1
   else
-    sudo -u postgres psql -c "CREATE USER mdmesh WITH PASSWORD '${DB_PASSWORD}';"
+    role_password_sql CREATE | sudo -u postgres psql -v ON_ERROR_STOP=1
   fi
   sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='mdmesh'" | grep -q 1 || \
     sudo -u postgres psql -c "CREATE DATABASE mdmesh OWNER mdmesh;"
@@ -418,8 +420,10 @@ ok "PostgreSQL role + database 'mdmesh' ready"
 # to KEEPING it: we only deploy new code + run Liquibase migrations (non-destructive). Replacing is opt-in
 # and drops the DB for a clean slate. Override non-interactively with REPLACE_DATA=yes|no.
 q() { PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -U mdmesh -d mdmesh -tAc "$1" 2>/dev/null | tr -d '[:space:]'; }
+# A function, not `env PGPASSWORD=... psql`: env would carry the password on its command line.
+mdmesh_psql() { PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -U mdmesh -d mdmesh "$@"; }
 # shellcheck disable=SC2034  # PSQL is consumed by install/lib/db.sh
-PSQL=(env PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -U mdmesh -d mdmesh)
+PSQL=(mdmesh_psql)
 SEED=yes
 DB_STATE=$(mdm_db_state)   # fresh | seeded | inconsistent | unavailable (no schema yet on a new box)
 # "unavailable" on a box that already HAS the schema means we could not read the settings table, not that
@@ -484,19 +488,24 @@ step "Fetching the agent APK from GitHub Releases"
 GITHUB_REPO="${GITHUB_REPO:-$(git remote get-url origin 2>/dev/null | sed -E 's#(git@|https?://)[^/:]+[/:]##; s#\.git$##')}"
 AGENT_APK=""
 if [ -n "$GITHUB_REPO" ]; then
-  AUTH=(); [ -n "${GITHUB_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+  # gh_curl ARGS...: curl, sending GITHUB_TOKEN (when set) as an Authorization header read from stdin (-H @-, curl 7.55+),
+  # never on curl's command line, which every local user can read (ps, /proc/<pid>/cmdline).
+  gh_curl() {
+    if [ -n "${GITHUB_TOKEN:-}" ]; then printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN" | curl -H @- "$@"
+    else curl "$@"; fi
+  }
   jget() { python3 -c 'import sys,json;
 d=json.load(sys.stdin)
 def asset(n): return next((a["browser_download_url"] for a in d.get("assets",[]) if a["name"]==n),"")
 print({"apk":asset("mdmesh-agent.apk"),"manifest":asset("manifest.json")}.get(sys.argv[1],""))' "$1" 2>/dev/null; }
-  REL=$(curl -fsSL "${AUTH[@]}" "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>>"$LOGFILE" || true)
+  REL=$(gh_curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>>"$LOGFILE" || true)
   APK_URL=$(printf '%s' "$REL" | jget apk); MAN_URL=$(printf '%s' "$REL" | jget manifest)
   if [ -n "$APK_URL" ] && [ -n "$MAN_URL" ]; then
-    MAN=$(curl -fsSL "${AUTH[@]}" "$MAN_URL" 2>>"$LOGFILE" || true)
+    MAN=$(gh_curl -fsSL "$MAN_URL" 2>>"$LOGFILE" || true)
     AGENT_CK=$(printf '%s' "$MAN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["components"]["apk"]["signatureChecksum"])' 2>/dev/null || true)
     WANT_SHA=$(printf '%s' "$MAN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["components"]["apk"]["sha256"])' 2>/dev/null || true)
     TMP_APK=$(mktemp)
-    if curl -fsSL "${AUTH[@]}" "$APK_URL" -o "$TMP_APK" 2>>"$LOGFILE" && [ -n "$AGENT_CK" ] \
+    if gh_curl -fsSL "$APK_URL" -o "$TMP_APK" 2>>"$LOGFILE" && [ -n "$AGENT_CK" ] \
        && [ "$(sha256sum "$TMP_APK" | awk '{print $1}')" = "$WANT_SHA" ]; then
       AGENT_APK="$TMP_APK"
       export VITE_AGENT_PACKAGE="com.mdmesh.agent" VITE_AGENT_CHECKSUM="$AGENT_CK" VITE_AGENT_APK_URL="/files/agent.apk"
