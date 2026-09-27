@@ -1,7 +1,8 @@
 # T1 integration gate: the agent-v1 end-to-end suite (scripts/agent-v1-e2e.sh) against a REAL
 # server + Postgres, on every PR that can change server behaviour and on push to main. T0
 # (t0-fast.yml) stays DB-free and under 5 minutes; this tier owns everything that needs a running
-# control plane. Target: under 10 minutes.
+# control plane. Target: under 10 minutes. The job timeout is 25: a cold server image build (no layer cache,
+# as on a fresh hosted runner) has taken about 10.5 minutes on its own, before the first boot and the suite.
 #
 # It runs the dev loop of docs/DEV.md, not a CI-only one: the dev stack (docker-compose.yml, the
 # production stack, + docker-compose.dev.yml via docker/dev.env) builds the server image from
@@ -46,7 +47,7 @@ jobs:
     needs: paths
     if: needs.paths.outputs.all == 'true' || fromJSON(needs.paths.outputs.matched).e2e
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     # Shell variables override docker/dev.env (compose's rule). Per run, so concurrent runs on a daemon shared by
     # several runners (vars.CI_RUNNER) never share a project, its volumes, the server image tag or a host port: the
     # project name and image tag carry the run id, and port 0 publishes each loopback port on a free ephemeral port
