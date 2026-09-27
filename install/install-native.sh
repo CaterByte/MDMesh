@@ -187,9 +187,15 @@ have_systemd() { command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/syste
 # match, systemctl then gets SIGPIPE writing its footer, and under pipefail the pipeline fails, so the unit reads as absent.
 unit_installed() { have_systemd && [ -n "$(systemctl list-unit-files --no-legend "$1.service" 2>/dev/null)" ]; }
 # Stops the supervisor unit if it exists (older installs ran it as root; either way it must not run during root writes).
+# A unit that does not run as $SVC_USER is also disabled, before the first root write: the deploy step's chown -R hands
+# its code to $SVC_USER, and if this run stopped before the unit is rewritten, the next boot would run that code as root.
+# The supervisor step re-enables the rewritten unit; one that already runs as $SVC_USER is left enabled.
 stop_supervisor() {
   if unit_installed "$SUP_UNIT"; then
     systemctl stop "$SUP_UNIT" >/dev/null 2>&1 || true
+    if [ "$(systemctl show -p User --value "$SUP_UNIT" 2>/dev/null)" != "$SVC_USER" ]; then
+      systemctl disable "$SUP_UNIT" >> "$LOGFILE" 2>&1 || _fail "Could not disable the old ${SUP_UNIT} unit (it runs as root)"
+    fi
   fi
 }
 port_holder() {
