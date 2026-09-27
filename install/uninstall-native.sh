@@ -106,7 +106,8 @@ if [ -f "$UNIT" ] || [ -n "$(systemctl list-unit-files --no-legend mdmesh-superv
   echo "  ✓ mdmesh-supervisor service removed"
 fi
 if [ -d "$SUP_ENV_DIR" ]; then
-  rm -f "$SUP_ENV_DIR/supervisor.env"
+  # With the temp file a killed install run may have left (install-native.sh write_under's .NAME.mdmesh-tmp.XXXXXX).
+  rm -f "$SUP_ENV_DIR/supervisor.env" "$SUP_ENV_DIR"/.supervisor.env.mdmesh-tmp.??????
   if rmdir "$SUP_ENV_DIR" 2>/dev/null; then echo "  ✓ removed $SUP_ENV_DIR/supervisor.env and $SUP_ENV_DIR"
   else echo "  ✓ removed $SUP_ENV_DIR/supervisor.env (kept $SUP_ENV_DIR: it holds other files)"; fi
 fi

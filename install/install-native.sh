@@ -153,8 +153,9 @@ SUP_ENV_DIR=/etc/mdmesh
 # so a link planted there must never be followed. guard_under ROOT REL refuses (fails the install) when ROOT or any
 # component of ROOT/REL is a symbolic link. write_under ROOT REL CMD... guards REL, runs CMD with its stdout going to a
 # fresh mode-600 file (mktemp) in REL's directory, and renames that over REL in one step (mv -fT never follows a link or
-# descends into a directory there). Temp files a killed run left behind are removed first (ROOT.xml's hold its
-# secrets). tc_guard/tc_write REL and base_guard/base_write REL are these for $CATALINA and $BASE_DIR. Before these run,
+# descends into a directory there). The temp file is named .NAME.mdmesh-tmp.XXXXXX, and the ones a killed run left
+# behind (ROOT.xml's hold its secrets) are removed first, by that pattern only: a plain NAME.?????? glob would also
+# delete an admin's NAME.backup. (Earlier versions used NAME.XXXXXX; such leftovers are left alone.) tc_guard/tc_write REL and base_guard/base_write REL are these for $CATALINA and $BASE_DIR. Before these run,
 # Tomcat and the supervisor (both run as $SVC_USER) are stopped, every other $SVC_USER process is killed (kill_svc_user),
 # and the install stops if the account has a crontab or at jobs that could start a new one (refuse_svc_user_jobs); the
 # two units are started again after the last write. That leaves only a process that some other root service starts as
@@ -171,12 +172,13 @@ guard_under() {
   done
 }
 write_under() {
-  local root="$1" rel="$2" tmp
+  local root="$1" rel="$2" dir name tmp
   shift 2
   guard_under "$root" "$rel"
-  mkdir -p "$(dirname "$root/$rel")"
-  rm -f "$root/$rel".??????
-  tmp=$(mktemp "$root/$rel.XXXXXX")
+  dir=$(dirname "$root/$rel") name=$(basename "$rel")
+  mkdir -p "$dir"
+  rm -f "$dir/.$name".mdmesh-tmp.??????
+  tmp=$(mktemp "$dir/.$name.mdmesh-tmp.XXXXXX")
   if "$@" > "$tmp" && chmod 600 "$tmp" && mv -fT "$tmp" "$root/$rel"; then return 0; fi
   rm -f "$tmp"
   _fail "Could not write $root/$rel"
@@ -659,9 +661,10 @@ if [ "$SEED" = no ]; then
   BK_DIR="$BASE_DIR/backups"; base_guard backups; mkdir -p "$BK_DIR"; chmod 700 "$BK_DIR"
   BK="$BK_DIR/mdmesh-pre-upgrade-$(date +%Y%m%d-%H%M%S).dump"
   # Dumped into a fresh mktemp file that is renamed over $BK (mv -fT replaces a link planted at that name instead of
-  # writing through it; mktemp already made it mode 600). Temp dumps a killed run left behind are removed first.
-  rm -f "$BK_DIR"/mdmesh-pre-upgrade-*.dump.??????
-  _bk_tmp=$(mktemp "$BK.XXXXXX")
+  # writing through it; mktemp already made it mode 600). Temp dumps a killed run left behind are removed first, by
+  # their own .mdmesh-tmp. names only (as in write_under).
+  rm -f "$BK_DIR"/.mdmesh-pre-upgrade-*.dump.mdmesh-tmp.??????
+  _bk_tmp=$(mktemp "$BK_DIR/.${BK##*/}.mdmesh-tmp.XXXXXX")
   # shellcheck disable=SC2024  # we ARE root here (checked at the top); sudo only switches to the postgres role
   if sudo -u postgres pg_dump -Fc mdmesh > "$_bk_tmp" 2>>"$LOGFILE" && mv -fT "$_bk_tmp" "$BK"; then
     ok "pg_dump written: $BK  (restore: pg_restore -c -d mdmesh $BK)"

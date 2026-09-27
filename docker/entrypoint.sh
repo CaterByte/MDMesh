@@ -42,7 +42,9 @@ jwt_secret_ok() {
   [ "${#1}" -ge 128 ] && [ $(( ${#1} % 4 )) -eq 0 ]
 }
 # Temp key files (mktemp below) of a start that was killed before publishing its key hold a key: remove them first.
-rm -f "$JWT_SECRET_FILE".??????
+# They have a name of their own (.jwt.secret.mdmesh-tmp.XXXXXX), so an admin's jwt.secret.backup is never matched.
+# (Earlier images used jwt.secret.XXXXXX; such leftovers are left alone.)
+rm -f /opt/mdmesh/.jwt.secret.mdmesh-tmp.??????
 if [ -n "$JWT_SECRET" ]; then
   if ! jwt_secret_ok "$JWT_SECRET"; then
     echo "JWT_SECRET (SERVER_JWT_SECRET in .env) must be hex, a multiple of 4 characters and at least 128 long (the JWT library would silently drop anything else). Generate one with: openssl rand -hex 64 (or unset it to use the key kept in $JWT_SECRET_FILE)" >&2
@@ -64,7 +66,7 @@ else
     # it only if no key exists yet, so concurrent first starts converge on the first writer's key; mv is the fallback
     # for a volume without hard links. The chown -R below hands the file to the server user. The trap removes the temp
     # file if this start fails before it is published.
-    _jwt_tmp=$(mktemp "$JWT_SECRET_FILE.XXXXXX")
+    _jwt_tmp=$(mktemp /opt/mdmesh/.jwt.secret.mdmesh-tmp.XXXXXX)
     trap 'rm -f "$_jwt_tmp"' EXIT
     printf '%s\n' "$_jwt_new" > "$_jwt_tmp"
     ln "$_jwt_tmp" "$JWT_SECRET_FILE" 2>/dev/null || [ -e "$JWT_SECRET_FILE" ] || mv -f "$_jwt_tmp" "$JWT_SECRET_FILE"
@@ -80,9 +82,9 @@ fi
 # Written to a fresh mktemp file (O_EXCL, mode 600: it holds the DB password) that is renamed over ROOT.xml in one step
 # (mv -fT replaces a link planted there instead of following it; a planted directory stops the start). The temp file
 # holds the secrets too: the trap removes it if this start fails before the rename, and leftovers of a start that was
-# killed outright are removed first.
-rm -f "$CONF_DIR"/ROOT.xml.??????
-_root_xml_tmp=$(mktemp "$CONF_DIR/ROOT.xml.XXXXXX")
+# killed outright are removed first, by the temp file's own name only (an admin's ROOT.xml.backup is kept).
+rm -f "$CONF_DIR"/.ROOT.xml.mdmesh-tmp.??????
+_root_xml_tmp=$(mktemp "$CONF_DIR/.ROOT.xml.mdmesh-tmp.XXXXXX")
 trap 'rm -f "$_root_xml_tmp"' EXIT
 cat > "$_root_xml_tmp" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
