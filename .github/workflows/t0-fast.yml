@@ -71,9 +71,9 @@ jobs:
         run: cp server/build.properties.example server/build.properties
       - if: matrix.name == 'server' && (needs.paths.outputs.all == 'true' || fromJSON(needs.paths.outputs.matched).server)
         name: Contract + unit tests (DB-free)
-        # The :common tests (incl. AgentV1ContractTest — the backward-compat gate) need no database.
-        # Keep -DskipTests on the package step until a CI test DB exists for the DB-bound modules.
-        run: mvn -B -pl common test
+        # :common tests (incl. AgentV1ContractTest — the backward-compat gate) and the DB-free :server tests need no
+        # database. The package step skips tests (they just ran); DB-backed behaviour is T1's (t1-e2e.yml).
+        run: mvn -B -pl server -am test
       - if: matrix.name == 'server' && (needs.paths.outputs.all == 'true' || fromJSON(needs.paths.outputs.matched).server)
         name: Build WAR
         run: mvn -B -DskipTests package
