@@ -69,14 +69,19 @@ if [ "$BACKUP" = 1 ] && db_exists; then
 fi
 
 # 2. Stop Tomcat for good: the systemd unit first (cgroup-tracked), then legacy fallbacks for Tomcats
-#    started by older versions of the installer without a unit.
+#    started by older versions of the installer without a unit. $CATALINA is $SVC_USER's tree, so root never runs its
+#    bin/catalina.sh (nor the bin/setenv.sh it sources): with the unit, systemd stops Tomcat; without one, catalina.sh
+#    runs as $SVC_USER (no controlling terminal, none of root's environment; see as_svc_user in install-native.sh), and
+#    before that account existed (Tomcat ran as root) the signals below stop it.
 if [ -f "$SERVER_UNIT" ] || systemctl list-unit-files 2>/dev/null | grep -q '^mdmesh-server'; then
   systemctl disable --now mdmesh-server >/dev/null 2>&1 || true
   rm -f "$SERVER_UNIT"; systemctl daemon-reload 2>/dev/null || true
   echo "  ✓ mdmesh-server service removed"
-fi
-if [ -x "$CATALINA/bin/catalina.sh" ]; then
-  CATALINA_PID="$CATALINA/tomcat.pid" "$CATALINA/bin/catalina.sh" stop 20 -force >/dev/null 2>&1 || true
+elif [ -x "$CATALINA/bin/catalina.sh" ] && id -u "$SVC_USER" >/dev/null 2>&1; then
+  ( cd / && exec setsid -w setpriv --reuid="$SVC_USER" --regid="$SVC_USER" --init-groups --no-new-privs \
+      env -i PATH=/usr/local/bin:/usr/bin:/bin JAVA_HOME="${JAVA_HOME:-}" CATALINA_HOME="$CATALINA" \
+      CATALINA_BASE="$CATALINA" CATALINA_PID="$CATALINA/tomcat.pid" "$CATALINA/bin/catalina.sh" stop 20 -force \
+      < /dev/null ) >/dev/null 2>&1 || true
 fi
 for p in $(pgrep -f "^[^ ]*/java .*catalina.base=$CATALINA" || true); do kill "$p" 2>/dev/null || true; done
 for _ in $(seq 1 20); do pgrep -f "^[^ ]*/java .*catalina.base=$CATALINA" >/dev/null || break; sleep 1; done

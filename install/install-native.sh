@@ -221,6 +221,16 @@ svc_cat() {
     cat -- "$1"
   fi
 }
+# as_svc_user CMD...: runs CMD as $SVC_USER. For Tomcat's own scripts: $CATALINA is that account's tree, so bin/catalina.sh
+# and the bin/setenv.sh it sources are code the account can rewrite, and root must never run them. setsid leaves CMD
+# without a controlling terminal (it could otherwise push keystrokes into root's shell with TIOCSTI), and env -i gives it
+# only Tomcat's settings (those the unit sets), not root's environment.
+as_svc_user() {
+  ( cd / && exec setsid -w setpriv --reuid="$SVC_USER" --regid="$SVC_USER" --init-groups --no-new-privs \
+      env -i PATH=/usr/local/bin:/usr/bin:/bin LANG="${LANG:-C.UTF-8}" JAVA_HOME="${JAVA_HOME:-}" \
+      CATALINA_HOME="$CATALINA" CATALINA_BASE="$CATALINA" CATALINA_PID="$CATALINA_PID" CATALINA_OPTS="${CATALINA_OPTS:-}" \
+      "$@" < /dev/null )
+}
 port_holder() {
   if command -v ss >/dev/null 2>&1; then ss -ltnp 2>/dev/null | awk -v p=":$HTTP_PORT$" '$4 ~ p {print; exit}'
   elif command -v lsof >/dev/null 2>&1; then lsof -iTCP:"$HTTP_PORT" -sTCP:LISTEN -nP 2>/dev/null | awk 'NR==2{print; exit}'; fi
@@ -248,14 +258,18 @@ refuse_foreign_port() {
   exit 1
 }
 stop_tomcat() {
-  # Preferred: the systemd unit (cgroup-tracked, kills stragglers itself). The catalina.sh / pgrep paths
-  # below only matter for Tomcats started by older versions of this script, before the unit existed.
+  # Preferred: the systemd unit (cgroup-tracked, kills stragglers itself), and then catalina.sh is not run at all. The
+  # catalina.sh / pgrep paths below only matter without a unit (no systemd, or a Tomcat an older version of this script
+  # started). catalina.sh runs as $SVC_USER (as_svc_user), never as root; before that account exists (an install from
+  # before v0.2.9, whose Tomcat ran as root) the signals below stop Tomcat on their own.
+  local unit=0 p i
   if unit_installed "$SVC_UNIT"; then
-    systemctl stop "$SVC_UNIT" >/dev/null 2>&1 || true
+    unit=1; systemctl stop "$SVC_UNIT" >/dev/null 2>&1 || true
   fi
   [ -x "$CATALINA/bin/catalina.sh" ] || return 0
-  "$CATALINA/bin/catalina.sh" stop 30 -force >/dev/null 2>&1 || true
-  local p i
+  if [ "$unit" = 0 ] && id -u "$SVC_USER" >/dev/null 2>&1; then
+    as_svc_user "$CATALINA/bin/catalina.sh" stop 30 -force >/dev/null 2>&1 || true
+  fi
   for p in $(pgrep -f "^[^ ]*/java .*catalina.base=$CATALINA" || true); do kill "$p" 2>/dev/null || true; done
   for i in $(seq 1 30); do pgrep -f "^[^ ]*/java .*catalina.base=$CATALINA" >/dev/null || break; sleep 1; done
   for p in $(pgrep -f "^[^ ]*/java .*catalina.base=$CATALINA" || true); do kill -9 "$p" 2>/dev/null || true; done
@@ -648,7 +662,7 @@ UNIT
     || info "supervisor unit failed to start — check: journalctl -u ${SUP_UNIT}"
 else
   info "no systemd — start the supervisor manually, as $SVC_USER (never as root):"
-  info "  (cd /; set -a; . ${SUP_ENV_DIR}/supervisor.env; setpriv --reuid=$SVC_USER --regid=$SVC_USER --init-groups --no-new-privs $NODE_BIN ${SUP_DIR}/server.js &)"
+  info "  (cd /; set -a; . ${SUP_ENV_DIR}/supervisor.env; setsid setpriv --reuid=$SVC_USER --regid=$SVC_USER --init-groups --no-new-privs $NODE_BIN ${SUP_DIR}/server.js &)"
 fi
 
 step "Starting the server"
@@ -696,7 +710,7 @@ UNIT
   ok "Tomcat started as $SVC_USER (systemd unit ${SVC_UNIT}; enabled at boot)"
 else
   # No systemd (container/chroot): fall back to catalina.sh under the service user.
-  su -s /bin/sh "$SVC_USER" -c "JAVA_HOME='$JAVA_HOME' CATALINA_PID='$CATALINA_PID' CATALINA_OPTS='$CATALINA_OPTS' '$CATALINA/bin/catalina.sh' start" >> "$LOGFILE" 2>&1
+  as_svc_user "$CATALINA/bin/catalina.sh" start >> "$LOGFILE" 2>&1
   ok "Tomcat started as $SVC_USER (no systemd — not supervised)"
 fi
 
