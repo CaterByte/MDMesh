@@ -216,7 +216,7 @@ kill_svc_user() {
 # whose Tomcat ran as root) nothing unprivileged owns those trees, so root reads them.
 svc_cat() {
   if id -u "$SVC_USER" >/dev/null 2>&1; then
-    ( cd / && setpriv --reuid="$SVC_USER" --regid="$SVC_USER" --init-groups cat -- "$1" )
+    as_svc_user cat -- "$1"
   else
     cat -- "$1"
   fi
@@ -670,7 +670,7 @@ UNIT
     || info "supervisor unit failed to start — check: journalctl -u ${SUP_UNIT}"
 else
   info "no systemd — start the supervisor manually, as $SVC_USER (never as root):"
-  info "  (cd /; set -a; . ${SUP_ENV_DIR}/supervisor.env; setsid setpriv --reuid=$SVC_USER --regid=$SVC_USER --init-groups --no-new-privs $NODE_BIN ${SUP_DIR}/server.js &)"
+  info "  env -i PATH=/usr/local/bin:/usr/bin:/bin sh -c 'cd /; set -a; . ${SUP_ENV_DIR}/supervisor.env; setsid setpriv --reuid=$SVC_USER --regid=$SVC_USER --init-groups --no-new-privs $NODE_BIN ${SUP_DIR}/server.js </dev/null >>/var/log/mdmesh-supervisor.log 2>&1 &'"
 fi
 
 step "Starting the server"
@@ -731,7 +731,7 @@ fi
 # from whichever exists so the live status line below has something to show.
 last_log_line() {
   if have_systemd && systemctl is-active --quiet "$SVC_UNIT" 2>/dev/null; then journalctl -u "$SVC_UNIT" -n 1 -o cat --no-pager 2>/dev/null
-  else tail -n 1 "$CATALINA/logs/catalina.out" 2>/dev/null; fi
+  else as_svc_user tail -n 1 -- "$CATALINA/logs/catalina.out" 2>/dev/null; fi   # $SVC_USER's tree: never read as root
 }
 INIT_MARKER="$BASE_DIR/initialized.txt"
 schema_ready() {
@@ -762,7 +762,7 @@ if ! _migrate_wait; then
   printf '  %sLiquibase or server startup likely failed — last Tomcat log lines:%s\n' "$c_yel" "$c_reset"
   hr
   if unit_installed "$SVC_UNIT"; then journalctl -u "$SVC_UNIT" -n 30 -o cat --no-pager 2>/dev/null
-  else tail -n 30 "$CATALINA/logs/catalina.out" 2>/dev/null; fi | sed "s/^/    ${c_dim}/;s/$/${c_reset}/"
+  else as_svc_user tail -n 30 -- "$CATALINA/logs/catalina.out" 2>/dev/null; fi | sed "s/^/    ${c_dim}/;s/$/${c_reset}/"
   printf '    %s(full logs: journalctl -u %s  /  %s/logs/)%s\n' "$c_dim" "$SVC_UNIT" "$CATALINA" "$c_reset"; hr
   exit 1
 fi

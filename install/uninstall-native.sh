@@ -73,7 +73,7 @@ fi
 #    bin/catalina.sh (nor the bin/setenv.sh it sources): with the unit, systemd stops Tomcat; without one, catalina.sh
 #    runs as $SVC_USER (no controlling terminal, none of root's environment; see as_svc_user in install-native.sh), and
 #    before that account existed (Tomcat ran as root) the signals below stop it.
-if [ -f "$SERVER_UNIT" ] || systemctl list-unit-files 2>/dev/null | grep -q '^mdmesh-server'; then
+if [ -f "$SERVER_UNIT" ] || [ -n "$(systemctl list-unit-files --no-legend mdmesh-server.service 2>/dev/null)" ]; then
   systemctl disable --now mdmesh-server >/dev/null 2>&1 || true
   rm -f "$SERVER_UNIT"; systemctl daemon-reload 2>/dev/null || true
   echo "  ✓ mdmesh-server service removed"
@@ -89,7 +89,7 @@ for p in $(pgrep -f "^[^ ]*/java .*catalina.base=$CATALINA" || true); do kill -9
 echo "  ✓ Tomcat stopped"
 
 # 3. Updater service.
-if [ -f "$UNIT" ] || systemctl list-unit-files 2>/dev/null | grep -q '^mdmesh-supervisor'; then
+if [ -f "$UNIT" ] || [ -n "$(systemctl list-unit-files --no-legend mdmesh-supervisor.service 2>/dev/null)" ]; then
   systemctl disable --now mdmesh-supervisor >/dev/null 2>&1 || true
   rm -f "$UNIT"; systemctl daemon-reload 2>/dev/null || true
   echo "  ✓ mdmesh-supervisor service removed"
@@ -121,7 +121,10 @@ fi
 rm -f "$INSTALL_LOG"
 # 6. Service account — only when its files are gone too (a kept files/ dir stays owned by it).
 if [ "$KEEP_DATA" != 1 ] && id -u "$SVC_USER" >/dev/null 2>&1; then
-  userdel "$SVC_USER" 2>/dev/null && echo "  ✓ service user $SVC_USER removed" || true
+  pkill -KILL -u "$SVC_USER" 2>/dev/null || true   # userdel refuses while the account has processes
+  for _ in $(seq 1 20); do pgrep -u "$SVC_USER" >/dev/null || break; sleep 0.2; done
+  if userdel "$SVC_USER" 2>/dev/null; then echo "  ✓ service user $SVC_USER removed"
+  else echo "  ! could not remove the service user $SVC_USER (run: userdel $SVC_USER)"; fi
 fi
 echo
 echo "  MDMesh removed. Devices still enrolled will keep polling this server's URL until factory-reset or re-provisioned."
