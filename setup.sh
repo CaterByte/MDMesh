@@ -77,15 +77,16 @@ REPO_VERSION=$(mdm_repo_version .)
 # have moved the stack to a newer release than this checkout, refuse to build unless --allow-downgrade:
 # - a checkout older than the running release <running> (the .env CURRENT_VERSION, or SERVER_VERSION for an older .env
 #   without it; apply.sh writes both; empty on a fresh .env) would roll the code back;
-# - a checkout with no readable release tag (source tarball, no git, tags not fetched) is code of unknown version that
-#   would run under apply's release tags.
+# - a checkout with no readable release tag (source tarball, no git, tags not fetched, or a nearest tag that is not
+#   release-shaped, such as v0.3.1+build.5; see mdm_repo_version) is code of unknown version that would run under
+#   apply's release tags.
 # Called before anything is prompted for or written: right after an existing .env is read, or before a fresh one is
 # asked for. Also derives APPLY_SUPPORTED from IMAGE_OWNER (persisted below).
 version_preflight() {  # version_preflight <running>
   if [ "${IMAGE_OWNER:-local}" = "local" ]; then APPLY_SUPPORTED=0; else APPLY_SUPPORTED=1; fi
   [ "$APPLY_SUPPORTED" = 1 ] && [ "$ALLOW_DOWNGRADE" != 1 ] || return 0
   if [ -z "$REPO_VERSION" ]; then
-    err "Refusing to build: IMAGE_OWNER=${IMAGE_OWNER} gets its updates from apply, and setup.sh can't tell which version this checkout is (no readable release tag) — build from a tagged git checkout, or re-run with --allow-downgrade to build it anyway."
+    err "Refusing to build: IMAGE_OWNER=${IMAGE_OWNER} gets its updates from apply, and setup.sh can't tell which version this checkout is (no readable release tag vX.Y.Z or vX.Y.Z-pre) — build from a tagged git checkout, or re-run with --allow-downgrade to build it anyway."
     exit 1
   fi
   if mdm_version_gt "$1" "$REPO_VERSION"; then
@@ -214,8 +215,9 @@ export APPLY_SUPPORTED
 # older version, and on a registry owner a re-run would build old code under apply.sh's newer release tag.
 # version_preflight (above) has already refused an older checkout, or an untagged one, on a registry owner unless
 # --allow-downgrade.
-# No tag to read (no git, no tags fetched) → keep the .env values and warn (CURRENT_VERSION falls back to a
-# release-shaped SERVER_VERSION, else 0.0.0); on a registry owner this is only reached with --allow-downgrade.
+# No release tag to read (no git, no tags fetched, or the nearest tag is not release-shaped) → keep the .env values and
+# warn (CURRENT_VERSION falls back to a release-shaped SERVER_VERSION, else 0.0.0); on a registry owner this is only
+# reached with --allow-downgrade.
 # Persisted + exported for the same reason as APPLY_SUPPORTED.
 if [ -n "$REPO_VERSION" ]; then
   CURRENT_VERSION=$REPO_VERSION
@@ -229,7 +231,7 @@ else
   if [ "$APPLY_SUPPORTED" = 1 ]; then
     warn "--allow-downgrade: no release tag readable in this checkout — building this checkout's code under the kept tag ${CURRENT_VERSION} (SERVER_VERSION=${SERVER_VERSION:-latest})."
   else
-    warn "Could not read a release tag from this checkout (git missing, or tags not fetched) — keeping CURRENT_VERSION=${CURRENT_VERSION}."
+    warn "Could not read a release tag from this checkout (git missing, tags not fetched, or the nearest tag is not a release version vX.Y.Z[-pre]) — keeping CURRENT_VERSION=${CURRENT_VERSION}."
   fi
 fi
 setenv CURRENT_VERSION "$CURRENT_VERSION"
