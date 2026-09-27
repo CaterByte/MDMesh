@@ -307,7 +307,7 @@ fi
 INIT_RESULT=$(docker compose exec -T -u mdmesh server cat /opt/mdmesh/initialized.txt 2>/dev/null || true)
 if ! grep -q '^OK' <<< "$INIT_RESULT"; then
   err "The server reported an initialization error:"
-  printf '%s\n' "${INIT_RESULT:0:2000}" | sed 's/^/    /'
+  printf '%s\n' "${INIT_RESULT:0:2000}" | tr -d '\000-\010\013-\037\177' | sed 's/^/    /'   # the server's text: no control chars
   err "Fix the issue above and re-run ./setup.sh (it reuses your .env; no need to start over)."; exit 1
 fi
 
