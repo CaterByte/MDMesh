@@ -5,6 +5,12 @@
 # is safe. MQTT is intentionally off (our agent wakes over WebSocket; see ROOT.xml mqtt.server.uri="").
 set -e
 
+# The server writes /opt/mdmesh/initialized.txt when its initialization is over ("OK", or the error), and only if the
+# file is absent. It is on the persistent volume, so remove the previous start's first: setup.sh, quickstart.sh and
+# scripts/dev-seed.sh wait for it and read it as this start's result. First thing, so a start that fails below does not
+# leave the last one's "OK" behind. rm -f removes a link planted there, never its target.
+rm -f /opt/mdmesh/initialized.txt
+
 : "${DB_HOST:=postgres}"
 : "${DB_PORT:=5432}"
 : "${DB_NAME:=mdmesh}"

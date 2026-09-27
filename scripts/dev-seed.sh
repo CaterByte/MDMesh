@@ -61,7 +61,8 @@ for svc in postgres server; do
 done
 API="http://$("${DC[@]}" port server 8080)"   # the published host port, wherever DEV_API_PORT put it
 
-# initialized.txt lives on the server's data volume and survives restarts, so also wait for the API to answer. Both
+# docker/entrypoint.sh removes initialized.txt at every start, and the server writes it when its initialization is over
+# (with "OK" or the error), so also wait for the API to answer, which it does only after a boot that worked. Both
 # probes are silent: while Tomcat boots, refused or reset connections are expected, not errors worth printing.
 ready() { "${DC[@]}" exec -T server test -f /opt/mdmesh/initialized.txt >/dev/null 2>&1 \
           && curl -fs -o /dev/null -m 5 "$API/rest/public/auth/options" 2>/dev/null; }

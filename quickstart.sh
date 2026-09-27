@@ -141,12 +141,21 @@ docker compose up -d
 say "Waiting for the server to finish first-boot (Liquibase)…"
 BOOTED=0
 for _ in $(seq 1 60); do
-  if docker compose exec -T server test -f /opt/mdmesh/initialized.txt 2>/dev/null; then BOOTED=1; break; fi
+  if docker compose exec -T server test -s /opt/mdmesh/initialized.txt 2>/dev/null; then BOOTED=1; break; fi
   sleep 5
 done
 if [ "$BOOTED" != 1 ]; then
   err "Server did not finish first-boot within ~5 minutes. Last server logs:"
   docker compose logs --tail 40 server 2>&1 || true
+  err "Fix the issue above and re-run the quick start from this directory ($(pwd))."; exit 1
+fi
+# The marker holds "OK" or the server's initialization error (docker/entrypoint.sh removes the previous start's marker,
+# so it is this boot's). It is read as the server's own user: the volume is that account's, and the container's root
+# would follow a link planted there.
+INIT_RESULT=$(docker compose exec -T -u mdmesh server cat /opt/mdmesh/initialized.txt 2>/dev/null || true)
+if ! grep -q '^OK' <<< "$INIT_RESULT"; then
+  err "The server reported an initialization error:"
+  printf '%s\n' "${INIT_RESULT:0:2000}" | sed 's/^/    /'
   err "Fix the issue above and re-run the quick start from this directory ($(pwd))."; exit 1
 fi
 
