@@ -252,13 +252,14 @@ which listens on loopback `:9000` only, on the host with `curl -fsS 127.0.0.1:90
   **Docker:** the server generates it on its first start into its data volume (`/opt/mdmesh/jwt.secret`, mode 600)
   and reuses it on every start; an install made before it existed gets one on its first start of the new image, with
   no manual step. It is not in `.env`, so `docker compose down -v` deletes it with the volume and API clients sign in
-  again. To pin it, set `JWT_SECRET=<output of openssl rand -hex 64>` in `.env`; it wins over the file. A quick-start
-  install made before this release also needs the line `JWT_SECRET: ${JWT_SECRET:-}` under `server:` →
-  `environment:` in its `docker-compose.yml` for that. **Native:** the installer writes it as `jwt.secretkey` in
-  Tomcat's `ROOT.xml` (mode 600, next to `hash.secret`) and keeps it across re-runs and upgrades; an install made
-  before it existed gets one on its next installer run. Use only a hex value that is a multiple of 4 characters and at
-  least 128 long: the JWT library silently drops other characters, so the Docker server refuses to start with any
-  other `JWT_SECRET` (and replaces a key file that holds one), and the native installer replaces such a `jwt.secretkey`.
+  again. To pin it, set `SERVER_JWT_SECRET=<output of openssl rand -hex 64>` in `.env` (the server gets it as
+  `JWT_SECRET`); it wins over the file. A quick-start install made before this release also needs the line
+  `JWT_SECRET: ${SERVER_JWT_SECRET:-}` under `server:` → `environment:` in its `docker-compose.yml` for that.
+  **Native:** the installer writes it as `jwt.secretkey` in Tomcat's `ROOT.xml` (mode 600, next to `hash.secret`) and
+  keeps it across re-runs and upgrades; an install made before it existed gets one on its next installer run. Use
+  only a hex value that is a multiple of 4 characters and at least 128 long: the JWT library silently drops other
+  characters, so the Docker server refuses to start with any other `SERVER_JWT_SECRET` (and replaces a key file that
+  holds one), and the native installer replaces such a `jwt.secretkey`.
 - TLS everywhere (Cloudflare or Caddy/Let's Encrypt). DB + server ports are never published.
 - The agent talks HTTPS only. Set `SECURE_ENROLLMENT=1` (and the matching secret on the agent) to
   require signed enrollment.
