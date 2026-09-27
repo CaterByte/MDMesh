@@ -187,9 +187,11 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
   --allow-downgrade`). `git pull` first; `./setup.sh --allow-downgrade` builds and runs the older code on purpose
   (against the current database, which is not rolled back). It also stops when it can't tell which version the
   checkout is (no readable release tag: a source tarball, or tags not fetched); build from a tagged git checkout, or
-  pass `--allow-downgrade` to build that code under the release tags already in `.env`.
-- `./setup.sh` rejects an unknown option with a usage error (Docker mode); after `--native`, the other flags go to the
-  native installer.
+  pass `--allow-downgrade` to build that code anyway. It then keeps the image tags and `CURRENT_VERSION` that `.env`
+  already holds: on a fresh install that is `0.0.0`, so every release shows as an update.
+- `./setup.sh` rejects an unknown option with a usage error (Docker mode). With `--native` it passes its other flags
+  (such as `-y`), wherever they stand, to the native installer; `--reset` and `--allow-downgrade` are Docker-mode
+  flags, and `--native` ignores them.
 - Older agents keep working across server updates (versioned `/agent/v1` contract; see
   `docs/adr/0009-agent-v1-contract-stability.md`).
 
