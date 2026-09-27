@@ -210,11 +210,16 @@ An install upgraded from v0.2.1–v0.3.x keeps `/opt/mdmesh/log4j-mdmesh.xml` (a
 created it). The server no longer reads or writes them; delete them if you like.
 
 For a temporary DEBUG log, put a log4j 1.2 XML config at `/opt/mdmesh/log4j-debug.xml` and start the server with
-`JAVA_OPTS=-Dlog4j.configuration=file:///opt/mdmesh/log4j-debug.xml`:
-- Docker: `docker compose cp log4j-debug.xml server:/opt/mdmesh/`, add that `JAVA_OPTS=...` line to `.env`, then
-  `docker compose up -d server`.
+the JVM flag `-Dlog4j.configuration=file:///opt/mdmesh/log4j-debug.xml`:
+- Docker: `docker compose cp log4j-debug.xml server:/opt/mdmesh/`, add
+  `SERVER_JAVA_OPTS=-Dlog4j.configuration=file:///opt/mdmesh/log4j-debug.xml` to `.env` (the server gets it as
+  `JAVA_OPTS`), then `docker compose up -d server`. Quote a value that holds several flags
+  (`SERVER_JAVA_OPTS="-Xmx1g -Dlog4j.configuration=file:///opt/mdmesh/log4j-debug.xml"`): `setup.sh` reads `.env` as
+  shell, and an unquoted space stops it. A quick-start install made before this release also needs the line
+  `JAVA_OPTS: ${SERVER_JAVA_OPTS:-}` under `server:` → `environment:` in its `docker-compose.yml` for that.
 - Native: copy the file there (readable by the `mdmesh` user), run `systemctl edit mdmesh-server`, add
-  `Environment=JAVA_OPTS=...` under `[Service]`, then `systemctl restart mdmesh-server`.
+  `Environment=JAVA_OPTS=-Dlog4j.configuration=file:///opt/mdmesh/log4j-debug.xml` under `[Service]`, then
+  `systemctl restart mdmesh-server`.
 
 Undo it the same way afterwards: DEBUG logs every SQL statement.
 
