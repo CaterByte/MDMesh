@@ -120,16 +120,22 @@ function refreshApkAvailable() {
   if (state.apk) state.apk = { ...state.apk, available: apkReady() };
 }
 
-/** Copy a freshly-verified APK over the deployment's static hosting path (native installs). */
+/** Copy a freshly-verified APK over the deployment's static hosting path (native installs). The copy goes to a new,
+ *  exclusively-created temp name (COPYFILE_EXCL never opens an existing file or link), so nothing left in that
+ *  directory, such as a link planted at a predictable name or a leftover from an earlier run, is written through
+ *  or blocks the publish. */
 function publishApk(src) {
   if (!PUBLISH_APK_TO) return;
+  const tmp = `${PUBLISH_APK_TO}.${crypto.randomBytes(8).toString('hex')}.tmp`;
   try {
-    const tmp = PUBLISH_APK_TO + '.tmp';
     fs.mkdirSync(path.dirname(PUBLISH_APK_TO), { recursive: true });
-    fs.copyFileSync(src, tmp);
+    fs.copyFileSync(src, tmp, fs.constants.COPYFILE_EXCL);
     fs.renameSync(tmp, PUBLISH_APK_TO); // atomic — a device mid-download never sees a torn file
     console.log('[apk] published', PUBLISH_APK_TO);
-  } catch (e) { console.log('[apk] publish failed:', String((e && e.message) || e)); }
+  } catch (e) {
+    console.log('[apk] publish failed:', String((e && e.message) || e));
+    try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ }
+  }
 }
 
 /** Rebuild `state` from a poll result while preserving the live `apply`/`auto` view. */

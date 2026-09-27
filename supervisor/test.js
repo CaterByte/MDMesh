@@ -101,7 +101,8 @@ t.test('recovery.html escapes status strings before they reach innerHTML', () =>
 const cp = require('child_process');
 const HAS_MINISIGN = cp.spawnSync('minisign', ['-v']).status === 0;
 
-t.test('/update/status reports the mirrored APK as available once the warm-up download lands, without re-polling',
+t.test('/update/status reports the mirrored APK as available once the warm-up download lands, without re-polling; '
+  + 'the published copy never goes through a link planted at a temp name',
   { skip: !HAS_MINISIGN && 'minisign not installed', timeout: 20000 }, async (tt) => {
     const fs = require('fs'), os = require('os'), path = require('path'), http = require('http'), crypto = require('crypto');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sup-apk-'));
@@ -144,13 +145,20 @@ t.test('/update/status reports the mirrored APK as available once the warm-up do
     const preload = path.join(dir, 'fake-github.js');
     fs.writeFileSync(preload, "const f = globalThis.fetch;\n"
       + "globalThis.fetch = (u, o) => f(String(u).replace('https://api.github.com', process.env.FAKE_GITHUB), o);\n");
+    // On a native install PUBLISH_APK_TO is in Tomcat's files/ directory, and older versions ran the supervisor as root
+    // there. A link planted at the predictable temp name the publish step used to write through must be left alone,
+    // target included.
+    const files = path.join(dir, 'files'), outside = path.join(dir, 'outside');
+    fs.mkdirSync(files);
+    fs.writeFileSync(outside, 'NOT AN APK');
+    fs.symlinkSync(outside, path.join(files, 'agent.apk.tmp'));
     const port = await new Promise((r) => { const s = http.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
     child = cp.spawn(process.execPath, ['--require', preload, path.join(__dirname, 'server.js')], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, FAKE_GITHUB: `http://127.0.0.1:${gh.address().port}`, GITHUB_REPO: 'o/r', GITHUB_TOKEN: '',
         SUPERVISOR_PORT: String(port), SUPERVISOR_BIND: '127.0.0.1', CURRENT_VERSION: '9.9.9', APPLY_SUPPORTED: '0', AUTO_UPDATE: '0',
         UPDATE_CHANNEL: 'stable', POLL_INTERVAL_HOURS: '6',
-        MANIFEST_PUBKEY: path.join(dir, 'k.pub'), APK_CACHE_DIR: path.join(dir, 'apk'), PUBLISH_APK_TO: '',
+        MANIFEST_PUBKEY: path.join(dir, 'k.pub'), APK_CACHE_DIR: path.join(dir, 'apk'), PUBLISH_APK_TO: path.join(files, 'agent.apk'),
         AUTO_FILE: path.join(dir, 'auto.json'), RECOVERY_TOKEN_FILE: path.join(dir, 'recovery.token') } });
 
     // Wait for the startup poll's warm-up download to land. server.js logs "[apk] mirrored" in the same synchronous
@@ -170,4 +178,10 @@ t.test('/update/status reports the mirrored APK as available once the warm-up do
     a.deepEqual({ versionCode: status.apk && status.apk.versionCode, available: status.apk && status.apk.available },
       { versionCode: 999, available: true }, '/update/status must say available once the APK is being served');
     a.equal(releaseCalls, 1, 'the refresh comes from the download itself, not from another poll');
+
+    // publishApk runs in the same synchronous block as the "[apk] mirrored" line, so it has finished by now.
+    a.ok(fs.lstatSync(path.join(files, 'agent.apk')).isFile(), 'PUBLISH_APK_TO is a regular file, not the planted link');
+    a.ok(fs.readFileSync(path.join(files, 'agent.apk')).equals(apk), 'the verified APK is published to PUBLISH_APK_TO');
+    a.equal(fs.readFileSync(outside, 'utf8'), 'NOT AN APK', 'the planted link was not written through');
+    a.deepEqual(fs.readdirSync(files).sort(), ['agent.apk', 'agent.apk.tmp'], 'no temp file is left behind');
   });
