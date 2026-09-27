@@ -522,12 +522,12 @@ if [ "$SEED" = no ]; then
   BK_DIR="$BASE_DIR/backups"; base_guard backups; mkdir -p "$BK_DIR"; chmod 700 "$BK_DIR"
   BK="$BK_DIR/mdmesh-pre-upgrade-$(date +%Y%m%d-%H%M%S).dump"
   # Dumped into a fresh mktemp file that is renamed over $BK (mv -fT replaces a link planted at that name instead of
-  # writing through it). Temp dumps a killed run left behind are removed first.
+  # writing through it; mktemp already made it mode 600). Temp dumps a killed run left behind are removed first.
   rm -f "$BK_DIR"/mdmesh-pre-upgrade-*.dump.??????
   _bk_tmp=$(mktemp "$BK.XXXXXX")
   # shellcheck disable=SC2024  # we ARE root here (checked at the top); sudo only switches to the postgres role
   if sudo -u postgres pg_dump -Fc mdmesh > "$_bk_tmp" 2>>"$LOGFILE" && mv -fT "$_bk_tmp" "$BK"; then
-    chmod 600 "$BK"; ok "pg_dump written: $BK  (restore: pg_restore -c -d mdmesh $BK)"
+    ok "pg_dump written: $BK  (restore: pg_restore -c -d mdmesh $BK)"
   else
     rm -f "$_bk_tmp"
     printf '  %s✗ pg_dump failed — not upgrading without a backup. See %s%s\n' "$c_red" "$LOGFILE" "$c_reset"; exit 1
