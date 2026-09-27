@@ -11,7 +11,6 @@ COPY jwt ./jwt
 COPY notification ./notification
 COPY plugins ./plugins
 COPY server ./server
-COPY swagger ./swagger
 COPY install ./install
 RUN cp server/build.properties.example server/build.properties || true
 RUN mvn -q -B -DskipTests package

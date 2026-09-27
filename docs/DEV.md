@@ -68,6 +68,11 @@ docker compose --env-file docker/dev.env cp server/target/launcher.war server:/u
 The copied WAR lasts until the container is recreated (`down`, or `up -d --build` after a source change); then the
 image's own build is back.
 
+API reference: the server publishes its Swagger 2.0 description at `/rest/swagger.json` (no UI is bundled). To browse it,
+`curl --create-dirs -o /tmp/api/swagger.json http://localhost:8080/rest/swagger.json` then
+`docker run --rm -p 8081:8080 -e SWAGGER_JSON=/api/swagger.json -v /tmp/api:/api swaggerapi/swagger-ui` → <http://localhost:8081>
+(or open the file in editor.swagger.io).
+
 ## 2. Admin frontend (React)
 
 ```bash

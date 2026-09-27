@@ -36,7 +36,8 @@
     <!-- Don't change this -->
     <Parameter name="role.orgadmin.id" value="2"/>
 
-    <!-- Swagger Docs UI location -->
+    <!-- Swagger (OpenAPI) spec host and base path. Currently not read by the server: /rest/swagger.json takes its
+         base path from the context path (HMDMApplication) and publishes no host. -->
     <Parameter name="swagger.host" value="_BASE_HOST_"/>
     <Parameter name="swagger.base.path" value="_BASE_PATH_/rest"/>
 

@@ -35,7 +35,6 @@
         <module>jwt</module>
         <module>notification</module>
         <module>plugins</module>
-        <module>swagger/ui</module>
         <module>server</module>
     </modules>
 

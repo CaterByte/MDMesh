@@ -35,7 +35,7 @@ jobs:
         uses: ./.github/actions/ci-kit/changed-paths
         with:
           filters: |
-            server: pom.xml, common/**, jwt/**, notification/**, plugins/**, server/**, swagger/**
+            server: pom.xml, common/**, jwt/**, notification/**, plugins/**, server/**
             web: web/**
             agent: agent-android/**, proto/**
             supervisor: supervisor/**, docker/supervisor.Dockerfile, release/minisign.pub, scripts/supervisor-smoke.sh, .dockerignore

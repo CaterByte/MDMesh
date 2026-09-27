@@ -39,7 +39,7 @@ jobs:
           # suite itself. Listed explicitly: the kit's fail-closed **/Dockerfile* does not match
           # docker/server.Dockerfile (.github/** and docker-compose* fail closed anyway).
           filters: |
-            e2e: pom.xml, common/**, jwt/**, notification/**, plugins/**, server/**, swagger/**, proto/**, install/**, docker/entrypoint.sh, docker/server.Dockerfile, .dockerignore, docker-compose.yml, docker-compose.dev.yml, docker/dev.env, scripts/dev-seed.sh, scripts/agent-v1-e2e.sh
+            e2e: pom.xml, common/**, jwt/**, notification/**, plugins/**, server/**, proto/**, install/**, docker/entrypoint.sh, docker/server.Dockerfile, .dockerignore, docker-compose.yml, docker-compose.dev.yml, docker/dev.env, scripts/dev-seed.sh, scripts/agent-v1-e2e.sh
 
   agent-e2e:
     name: agent-e2e
