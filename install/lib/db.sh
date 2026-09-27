@@ -32,6 +32,14 @@ mdm_pwhash() {
 # Run psql strictly, quiet, tuples-only. Extra args are passed through (-c, -f, stdin).
 mdm_psql() { "${PSQL[@]}" -v ON_ERROR_STOP=1 -qAt "$@"; }
 
+# VALUE as one single-quoted psql meta-command argument (for \set on stdin): backslash and quote are escaped, and a
+# newline or CR is sent as its \n / \r escape because a meta-command ends at the end of its line.
+_mdm_psql_arg() {
+  local v=${1//\\/\\\\}
+  v=${v//\'/\\\'}; v=${v//$'\n'/\\n}; v=${v//$'\r'/\\r}
+  printf "'%s'" "$v"
+}
+
 # Classify the database. Prints one of:
 #   fresh          schema exists, no settings row, no devices  -> seed it
 #   seeded         a settings row exists                       -> keep data, repairs only
@@ -55,16 +63,21 @@ mdm_db_state() {
 # Postcondition: exactly one settings row, at least one configuration, and the admin row carries
 # the password hash we just wrote. Returns 1 (with psql output on stderr) otherwise.
 mdm_seed() {
-  local email=$1 seed_file=$2 admin_pw=$3 reset_token=$4 out hash st
+  local email=$1 seed_file=$2 admin_pw=$3 reset_token=$4 out hash st vars
   hash=$(mdm_pwhash "$admin_pw")
+  # The hash and the reset token reach psql on stdin as psql variables (:'h' quotes them as SQL literals), never on
+  # its argv, which every local user can read (ps, /proc/<pid>/cmdline).
+  vars="\\set h $(_mdm_psql_arg "$hash")"$'\n'"\\set t $(_mdm_psql_arg "$reset_token")"
   # --single-transaction: the seed is all-or-nothing, so a failure never leaves a half-seeded database.
   if ! out=$(sed "s/_ADMIN_EMAIL_/${email}/g" "$seed_file" | mdm_psql --single-transaction 2>&1); then
     printf 'seed SQL failed:\n%s\n' "$(printf '%s\n' "$out" | tail -n 20)" >&2; return 1
   fi
-  if ! out=$(mdm_psql -c "UPDATE users SET password='${hash}', passwordreset=true, passwordresettoken='${reset_token}' WHERE login='admin'" 2>&1); then
+  if ! out=$(printf '%s\n' "$vars" "UPDATE users SET password=:'h', passwordreset=true, passwordresettoken=:'t' WHERE login='admin';" \
+             | mdm_psql 2>&1); then
     printf 'setting the admin password failed:\n%s\n' "$out" >&2; return 1
   fi
-  st=$(mdm_psql -c "SELECT (SELECT count(*) FROM settings)||'/'||(SELECT count(*) FROM configurations)||'/'||(SELECT count(*) FROM users WHERE login='admin' AND password='${hash}')" 2>/dev/null | tr -d '[:space:]')
+  st=$(printf '%s\n' "$vars" "SELECT (SELECT count(*) FROM settings)||'/'||(SELECT count(*) FROM configurations)||'/'||(SELECT count(*) FROM users WHERE login='admin' AND password=:'h');" \
+       | mdm_psql 2>/dev/null | tr -d '[:space:]')
   case "$st" in
     1/0/*|1/*/0|0/*) printf 'seed postcondition failed (settings/configurations/admin-with-new-password = %s)\n' "$st" >&2; return 1 ;;
     1/*/1) return 0 ;;
