@@ -58,6 +58,7 @@ cd agent-android
 ./gradlew :proto:test :core:test          # unit tests
 ./gradlew :app:compileDebugKotlin          # type-check the app + its modules
 ./gradlew :app:assembleDebug               # build a debug APK
+./gradlew detekt                           # static analysis (baseline: config/detekt/baseline.xml)
 ```
 Install on an emulator and promote to Device Owner for testing:
 `adb install app-debug.apk && adb shell dpm set-device-owner com.mdmesh.agent.debug/com.mdmesh.agent.admin.AdminReceiver`
@@ -92,7 +93,8 @@ production installer (it writes a `.env` for a real host); see **[DEPLOY.md](DEP
 ### CI
 Every PR and every push to `main` runs two tiers; each skips the parts your change can't affect.
 - **T0** (`.github/workflows/t0-fast.yml`): builds each plane you touched and runs its DB-free tests, plus the
-  supervisor image smoke test and the edge (Caddy + compose) check.
+  supervisor image smoke test and the edge (Caddy + compose) check. The agent step also runs detekt: new Kotlin
+  must be clean; pre-existing findings are listed in `agent-android/config/detekt/baseline.xml`.
 - **T1** (`.github/workflows/t1-e2e.yml`): the Agent v1 end-to-end suite against a real server and Postgres. It
   runs the loop from [docs/DEV.md](docs/DEV.md) (the dev stack, `scripts/dev-seed.sh`, `scripts/agent-v1-e2e.sh`)
   on its own compose project, image tag and ephemeral ports. It runs when a change touches the server, `proto/`,
