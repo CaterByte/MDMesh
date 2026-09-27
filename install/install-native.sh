@@ -183,9 +183,12 @@ tc_write()   { local rel="$1"; shift; write_under "$CATALINA" "$rel" "$@"; }
 base_guard() { guard_under "$BASE_DIR" "$1"; }
 base_write() { local rel="$1"; shift; write_under "$BASE_DIR" "$rel" "$@"; }
 have_systemd() { command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; }
+# unit_installed NAME: NAME.service is installed. Not `systemctl list-unit-files | grep -q`: grep exits at the first
+# match, systemctl then gets SIGPIPE writing its footer, and under pipefail the pipeline fails, so the unit reads as absent.
+unit_installed() { have_systemd && [ -n "$(systemctl list-unit-files --no-legend "$1.service" 2>/dev/null)" ]; }
 # Stops the supervisor unit if it exists (older installs ran it as root; either way it must not run during root writes).
 stop_supervisor() {
-  if have_systemd && systemctl list-unit-files 2>/dev/null | grep -q "^${SUP_UNIT}\.service"; then
+  if unit_installed "$SUP_UNIT"; then
     systemctl stop "$SUP_UNIT" >/dev/null 2>&1 || true
   fi
 }
@@ -218,7 +221,7 @@ refuse_foreign_port() {
 stop_tomcat() {
   # Preferred: the systemd unit (cgroup-tracked, kills stragglers itself). The catalina.sh / pgrep paths
   # below only matter for Tomcats started by older versions of this script, before the unit existed.
-  if have_systemd && systemctl list-unit-files 2>/dev/null | grep -q "^${SVC_UNIT}\.service"; then
+  if unit_installed "$SVC_UNIT"; then
     systemctl stop "$SVC_UNIT" >/dev/null 2>&1 || true
   fi
   [ -x "$CATALINA/bin/catalina.sh" ] || return 0
@@ -697,7 +700,7 @@ if ! _migrate_wait; then
   printf '  %s✗ the server did not finish initializing within 5 minutes%s\n' "$c_red" "$c_reset"
   printf '  %sLiquibase or server startup likely failed — last Tomcat log lines:%s\n' "$c_yel" "$c_reset"
   hr
-  if have_systemd && systemctl list-unit-files 2>/dev/null | grep -q "^${SVC_UNIT}\.service"; then journalctl -u "$SVC_UNIT" -n 30 -o cat --no-pager 2>/dev/null
+  if unit_installed "$SVC_UNIT"; then journalctl -u "$SVC_UNIT" -n 30 -o cat --no-pager 2>/dev/null
   else tail -n 30 "$CATALINA/logs/catalina.out" 2>/dev/null; fi | sed "s/^/    ${c_dim}/;s/$/${c_reset}/"
   printf '    %s(full logs: journalctl -u %s  /  %s/logs/)%s\n' "$c_dim" "$SVC_UNIT" "$CATALINA" "$c_reset"; hr
   exit 1
