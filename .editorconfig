@@ -30,8 +30,8 @@ indent_size = 4
 [agent-android/config/detekt/baseline.xml]
 indent_size = 2
 
-# Tomcat context/web.xml files use 4.
-[{install/context_template.xml,server/conf/context.xml,**/WEB-INF/web.xml}]
+# Tomcat context files use 4.
+[{install/context_template.xml,server/conf/context.xml}]
 indent_size = 4
 
 # ProGuard rules follow the Kotlin side; Python (the vendored CI kit) is PEP 8.
@@ -50,6 +50,15 @@ indent_style = tab
 [common/src/test/resources/contract/**]
 insert_final_newline = unset
 trim_trailing_whitespace = unset
+
+# Email templates are read verbatim: a subject file that gains a final newline changes the mail header.
+[install/emails/**]
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+
+# Two upstream translation files start with a UTF-8 BOM; charset = utf-8 would drop it on save.
+[plugins/deviceinfo/src/main/resources/plugin_deviceinfo_translations_*.properties]
+charset = unset
 
 # Windows batch files keep their line endings.
 [*.bat]

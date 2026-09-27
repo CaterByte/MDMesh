@@ -49,8 +49,8 @@ to the same server without special-casing. Unknown command types degrade to
 ## Build
 
 ```bash
-./gradlew assembleDebug                               # app/build/outputs/apk/debug/app-debug.apk
-./gradlew assembleDebug lintDebug testDebugUnitTest   # what CI runs (T0)
+./gradlew assembleDebug                                      # app/build/outputs/apk/debug/app-debug.apk
+./gradlew detekt assembleDebug lintDebug testDebugUnitTest   # what CI runs (T0)
 ```
 
 > The Gradle wrapper is committed (`gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar`
