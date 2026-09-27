@@ -87,6 +87,14 @@ function sha256Matches(buf, expectedSha) {
   return got.toLowerCase() === String(expectedSha).toLowerCase();
 }
 
+/** True iff `name` is one of publishApk's temp files for the published file `base`: `<base>.<16 lowercase hex>.tmp`
+ *  (server.js names them with crypto.randomBytes(8).toString('hex')). Only these are ever cleaned up from the
+ *  public files directory. */
+function isPublishTemp(name, base) {
+  const prefix = base + '.';
+  return name.startsWith(prefix) && /^[0-9a-f]{16}\.tmp$/.test(name.slice(prefix.length));
+}
+
 // Marks the recovery page with whether one-click apply/rollback works on this deployment, server-side, so the
 // page hides Roll back (and shows the manual update steps) from the first paint — no JS or status fetch needed.
 function recoveryPage(html, applySupported) {
@@ -96,5 +104,5 @@ function recoveryPage(html, applySupported) {
 module.exports = {
   parseSemver, semverGt, pickRelease, shapeStatus,
   imageTags, nextPhase, isTerminal, APPLY_PHASES, APPLY_TERMINAL,
-  apkAsset, sha256Matches, recoveryPage,
+  apkAsset, sha256Matches, recoveryPage, isPublishTemp,
 };

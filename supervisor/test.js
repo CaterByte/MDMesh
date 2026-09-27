@@ -1,6 +1,6 @@
 const t = require('node:test');
 const a = require('node:assert');
-const { semverGt, pickRelease, shapeStatus, imageTags, nextPhase, isTerminal, apkAsset, sha256Matches, recoveryPage } = require('./lib');
+const { semverGt, pickRelease, shapeStatus, imageTags, nextPhase, isTerminal, apkAsset, sha256Matches, recoveryPage, isPublishTemp } = require('./lib');
 
 t.test('semverGt', () => {
   a.equal(semverGt('1.2.4', '1.2.3'), true);
@@ -96,13 +96,74 @@ t.test('recovery.html escapes status strings before they reach innerHTML', () =>
   }
 });
 
+t.test('isPublishTemp — only publishApk\'s own temp names', () => {
+  a.equal(isPublishTemp('agent.apk.0123456789abcdef.tmp', 'agent.apk'), true);
+  a.equal(isPublishTemp('agent.apk.0123456789ABCDEF.tmp', 'agent.apk'), false); // randomBytes().toString('hex') is lowercase
+  a.equal(isPublishTemp('agent.apk.tmp', 'agent.apk'), false);
+  a.equal(isPublishTemp('agent.apk.0123456789abcde.tmp', 'agent.apk'), false);  // 15 hex
+  a.equal(isPublishTemp('agent.apk.0123456789abcdef0.tmp', 'agent.apk'), false); // 17 hex
+  a.equal(isPublishTemp('agent.apk.0123456789abcdef.tmp.x', 'agent.apk'), false);
+  a.equal(isPublishTemp('other.apk.0123456789abcdef.tmp', 'agent.apk'), false);
+  a.equal(isPublishTemp('agentXapk.0123456789abcdef.tmp', 'agent.apk'), false);  // the '.' in the name is literal
+  a.equal(isPublishTemp('agent.apk.backup', 'agent.apk'), false);
+  a.equal(isPublishTemp('a+b(1).apk.0123456789abcdef.tmp', 'a+b(1).apk'), true);  // regex metacharacters in the name
+});
+
 // --- Process-level: the real server.js against a local fake GitHub (no network). Skipped without minisign; the
 // supervisor image (where CI runs this file) ships it. ---
 const cp = require('child_process');
 const HAS_MINISIGN = cp.spawnSync('minisign', ['-v']).status === 0;
 
+// publishApk's temp files (PUBLISH_APK_TO.<16 hex>.tmp) sit in Tomcat's public files/ dir; one left by a process that
+// died mid-copy would be served under /files/. The supervisor removes them when it starts (and before each publish,
+// below): only that exact shape, only a regular file or a link (the link itself, never its target).
+t.test('stale publish temp files are removed at start; nothing else in the files dir is touched', { timeout: 20000 }, async (tt) => {
+  const fs = require('fs'), os = require('os'), path = require('path'), http = require('http');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sup-tmp-'));
+  let child = null;
+  tt.after(async () => {
+    if (child && child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise((r) => child.once('exit', r));
+      child.kill();
+      await exited;
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const files = path.join(dir, 'files'), outside = path.join(dir, 'outside');
+  fs.mkdirSync(files);
+  fs.writeFileSync(outside, 'OUTSIDE');
+  fs.writeFileSync(path.join(files, 'agent.apk'), 'CURRENT APK');
+  fs.writeFileSync(path.join(files, 'agent.apk.0123456789abcdef.tmp'), 'PARTIAL COPY');     // stale: removed
+  fs.symlinkSync(outside, path.join(files, 'agent.apk.fedcba9876543210.tmp'));              // stale link: unlinked, target kept
+  fs.mkdirSync(path.join(files, 'agent.apk.aaaaaaaaaaaaaaaa.tmp'));                         // a directory: left alone
+  for (const keep of ['agent.apk.tmp', 'agent.apk.backup', 'agent.apk.0123.tmp', 'other.apk.0123456789abcdef.tmp']) {
+    fs.writeFileSync(path.join(files, keep), 'KEEP');
+  }
+  const port = await new Promise((r) => { const s = http.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
+  child = cp.spawn(process.execPath, [path.join(__dirname, 'server.js')], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    // No GITHUB_REPO: the startup poll does nothing, so nothing is published and only the start-up cleanup can act.
+    env: { ...process.env, GITHUB_REPO: '', GITHUB_TOKEN: '', SUPERVISOR_PORT: String(port), SUPERVISOR_BIND: '127.0.0.1',
+      APPLY_SUPPORTED: '0', AUTO_UPDATE: '0', MANIFEST_PUBKEY: path.join(dir, 'none.pub'), APK_CACHE_DIR: path.join(dir, 'apk'),
+      PUBLISH_APK_TO: path.join(files, 'agent.apk'), AUTO_FILE: path.join(dir, 'auto.json'),
+      RECOVERY_TOKEN_FILE: path.join(dir, 'recovery.token') } });
+  let log = '';
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('supervisor never listened:\n' + log)), 10000);
+    const onExit = (code) => { clearTimeout(timer); reject(new Error(`supervisor exited (${code}):\n${log}`)); };
+    const onData = (d) => { log += d; if (log.includes('supervisor on')) { clearTimeout(timer); child.off('exit', onExit); resolve(); } };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+    child.on('exit', onExit);
+  });
+  a.deepEqual(fs.readdirSync(files).sort(), ['agent.apk', 'agent.apk.0123.tmp', 'agent.apk.aaaaaaaaaaaaaaaa.tmp', 'agent.apk.backup',
+    'agent.apk.tmp', 'other.apk.0123456789abcdef.tmp'], 'only the stale temp file and link are gone');
+  a.equal(fs.readFileSync(outside, 'utf8'), 'OUTSIDE', 'the stale link\'s target is untouched');
+  a.equal(fs.readFileSync(path.join(files, 'agent.apk'), 'utf8'), 'CURRENT APK');
+});
+
 t.test('/update/status reports the mirrored APK as available once the warm-up download lands, without re-polling; '
-  + 'the published copy never goes through a link planted at a temp name',
+  + 'the published copy never goes through a link planted at a temp name, and stale publish temps are removed first',
   { skip: !HAS_MINISIGN && 'minisign not installed', timeout: 20000 }, async (tt) => {
     const fs = require('fs'), os = require('os'), path = require('path'), http = require('http'), crypto = require('crypto');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sup-apk-'));
@@ -135,7 +196,11 @@ t.test('/update/status reports the mirrored APK as available once the warm-up do
         res.setHeader('content-type', 'application/json');
         res.end(JSON.stringify([{ tag_name: 'v9.9.9', html_url: base + '/rel', assets: ['manifest.json', 'manifest.json.minisig', 'mdmesh-agent.apk']
           .map((name) => ({ name, browser_download_url: `${base}/dl/${name}` })) }]));
-      } else if (req.url === '/dl/mdmesh-agent.apk') res.end(apk);
+      } else if (req.url === '/dl/mdmesh-agent.apk') {
+        // A stale publish temp that appears after start-up (not seen by the start-up cleanup): the publish removes it.
+        fs.writeFileSync(path.join(dir, 'files', 'agent.apk.1111111111111111.tmp'), 'STALE');
+        res.end(apk);
+      }
       else if (req.url === '/dl/manifest.json' || req.url === '/dl/manifest.json.minisig') res.end(fs.readFileSync(path.join(dir, req.url.slice(4))));
       else { res.statusCode = 404; res.end(); }
     });
@@ -183,5 +248,6 @@ t.test('/update/status reports the mirrored APK as available once the warm-up do
     a.ok(fs.lstatSync(path.join(files, 'agent.apk')).isFile(), 'PUBLISH_APK_TO is a regular file, not the planted link');
     a.ok(fs.readFileSync(path.join(files, 'agent.apk')).equals(apk), 'the verified APK is published to PUBLISH_APK_TO');
     a.equal(fs.readFileSync(outside, 'utf8'), 'NOT AN APK', 'the planted link was not written through');
-    a.deepEqual(fs.readdirSync(files).sort(), ['agent.apk', 'agent.apk.tmp'], 'no temp file is left behind');
+    a.deepEqual(fs.readdirSync(files).sort(), ['agent.apk', 'agent.apk.tmp'],
+      'no temp file is left behind, and the stale one that appeared before the publish is gone');
   });

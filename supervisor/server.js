@@ -7,7 +7,7 @@ const os = require('os');
 const cp = require('child_process');
 const path = require('path');
 const crypto = require('crypto');
-const { pickRelease, shapeStatus, imageTags, isTerminal, apkAsset, sha256Matches, recoveryPage } = require('./lib');
+const { pickRelease, shapeStatus, imageTags, isTerminal, apkAsset, sha256Matches, recoveryPage, isPublishTemp } = require('./lib');
 
 const PORT = +(process.env.SUPERVISOR_PORT || 9000);
 // Bind address. Docker keeps the default (all interfaces — the container has no published ports);
@@ -123,9 +123,10 @@ function refreshApkAvailable() {
 /** Copy a freshly-verified APK over the deployment's static hosting path (native installs). The copy goes to a new,
  *  exclusively-created temp name (COPYFILE_EXCL never opens an existing file or link), so nothing left in that
  *  directory, such as a link planted at a predictable name or a leftover from an earlier run, is written through
- *  or blocks the publish. */
+ *  or blocks the publish. Temp files a killed process left behind are removed first (removeStalePublishTemps). */
 function publishApk(src) {
   if (!PUBLISH_APK_TO) return;
+  removeStalePublishTemps();
   const tmp = `${PUBLISH_APK_TO}.${crypto.randomBytes(8).toString('hex')}.tmp`;
   try {
     fs.mkdirSync(path.dirname(PUBLISH_APK_TO), { recursive: true });
@@ -135,6 +136,25 @@ function publishApk(src) {
   } catch (e) {
     console.log('[apk] publish failed:', String((e && e.message) || e));
     try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ }
+  }
+}
+
+/** Temp files publishApk left behind when the process died between the copy and the rename. They sit in the public
+ *  files directory (Tomcat serves it under /files/), so they are removed at start-up and before each publish. Only
+ *  names of exactly publishApk's shape (isPublishTemp), and only a regular file or a link: lstat never follows a link,
+ *  and unlink removes the link itself, never its target. Anything else there (a directory, other names) is left alone. */
+function removeStalePublishTemps() {
+  if (!PUBLISH_APK_TO) return;
+  const dir = path.dirname(PUBLISH_APK_TO), base = path.basename(PUBLISH_APK_TO);
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return; } // no files dir yet: nothing to clean
+  for (const name of names) {
+    if (!isPublishTemp(name, base)) continue;
+    const p = path.join(dir, name);
+    try {
+      const st = fs.lstatSync(p);
+      if (st.isFile() || st.isSymbolicLink()) { fs.unlinkSync(p); console.log('[apk] removed stale temp file', p); }
+    } catch (e) { console.log('[apk] could not remove stale temp file', p, String((e && e.message) || e)); }
   }
 }
 
@@ -370,5 +390,6 @@ http.createServer(async (req, res) => {
   }
 }).listen(PORT, BIND, () => console.log('supervisor on', BIND + ':' + PORT));
 
+removeStalePublishTemps();
 poll();
 setInterval(poll, (+(process.env.POLL_INTERVAL_HOURS || 6)) * 3600 * 1000);
