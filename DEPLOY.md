@@ -272,4 +272,5 @@ which listens on loopback `:9000` only, on the host with `curl -fsS 127.0.0.1:90
   **minisign-verified** manifests and **authorized** callers (admin session, or the recovery token).
   Apply/rollback only ever recreate `server`/`caddy` — never `postgres` or the supervisor itself.
 - On native installs the supervisor runs as the unprivileged `mdmesh` user (like Tomcat), with its settings in the
-  root-owned `/etc/mdmesh/supervisor.env`. A `GITHUB_TOKEN` there is readable by that user, so use a read-only token.
+  root-owned `/etc/mdmesh/supervisor.env`. A `GITHUB_TOKEN` there reaches the supervisor's environment, which that user
+  can read, so use a read-only token.

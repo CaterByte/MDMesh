@@ -553,6 +553,7 @@ if ! id -u "$SVC_USER" >/dev/null 2>&1; then
   useradd --system --home-dir "$BASE_DIR" --shell /usr/sbin/nologin "$SVC_USER"
   info "created service user $SVC_USER"
 fi
+# chown -R follows no links, but it would chown a hard link's target: relies on fs.protected_hardlinks=1 (the default).
 chown -R "$SVC_USER:$SVC_USER" "$CATALINA" "$BASE_DIR"
 ok "server + console deployed (console at /, API at /rest); ROOT.xml written; owned by $SVC_USER"
 
@@ -586,6 +587,7 @@ step "Updater supervisor (release polling + verified agent-APK mirror)"
 SUP_DIR="$BASE_DIR/supervisor"
 for _f in server.js lib.js recovery.html; do base_write "supervisor/$_f" cat "$REPO/supervisor/$_f"; done
 base_write supervisor/minisign.pub cat "$REPO/release/minisign.pub"
+# chown -R follows no links, but it would chown a hard link's target: relies on fs.protected_hardlinks=1 (the default).
 chown -R "$SVC_USER:$SVC_USER" "$SUP_DIR"
 # The running version: the checkout's latest release tag (source installs track the repo). The
 # supervisor compares it against GitHub's latest to decide "update available". Same rule as setup.sh
@@ -646,7 +648,7 @@ UNIT
     || info "supervisor unit failed to start — check: journalctl -u ${SUP_UNIT}"
 else
   info "no systemd — start the supervisor manually, as $SVC_USER (never as root):"
-  info "  (set -a; . ${SUP_ENV_DIR}/supervisor.env; setpriv --reuid=$SVC_USER --regid=$SVC_USER --init-groups $NODE_BIN ${SUP_DIR}/server.js &)"
+  info "  (cd /; set -a; . ${SUP_ENV_DIR}/supervisor.env; setpriv --reuid=$SVC_USER --regid=$SVC_USER --init-groups --no-new-privs $NODE_BIN ${SUP_DIR}/server.js &)"
 fi
 
 step "Starting the server"

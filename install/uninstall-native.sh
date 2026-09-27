@@ -90,8 +90,9 @@ if [ -f "$UNIT" ] || systemctl list-unit-files 2>/dev/null | grep -q '^mdmesh-su
   echo "  ✓ mdmesh-supervisor service removed"
 fi
 if [ -d "$SUP_ENV_DIR" ]; then
-  rm -f "$SUP_ENV_DIR/supervisor.env"; rmdir "$SUP_ENV_DIR" 2>/dev/null || true
-  echo "  ✓ removed $SUP_ENV_DIR/supervisor.env"
+  rm -f "$SUP_ENV_DIR/supervisor.env"
+  if rmdir "$SUP_ENV_DIR" 2>/dev/null; then echo "  ✓ removed $SUP_ENV_DIR/supervisor.env and $SUP_ENV_DIR"
+  else echo "  ✓ removed $SUP_ENV_DIR/supervisor.env (kept $SUP_ENV_DIR: it holds other files)"; fi
 fi
 
 # 4. Database.
