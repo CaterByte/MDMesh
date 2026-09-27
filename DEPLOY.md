@@ -274,3 +274,5 @@ which listens on loopback `:9000` only, on the host with `curl -fsS 127.0.0.1:90
 - On native installs the supervisor runs as the unprivileged `mdmesh` user (like Tomcat), with its settings in the
   root-owned `/etc/mdmesh/supervisor.env`. A `GITHUB_TOKEN` there reaches the supervisor's environment, which that user
   can read, so use a read-only token.
+- The native installer stops if the `mdmesh` account has a crontab or `at` jobs (it never needs any): inspect them
+  (`crontab -l -u mdmesh`, `atq`), remove them (`crontab -r -u mdmesh`, `atrm <id>`) and re-run.
