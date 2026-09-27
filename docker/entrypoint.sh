@@ -130,4 +130,8 @@ trap - EXIT
 # Volumes from older deployments are root-owned; make them writable for the unprivileged user, then drop
 # root for good. setpriv ships with util-linux on the Debian-based tomcat image (no gosu needed).
 chown -R mdmesh:mdmesh /opt/mdmesh /usr/local/tomcat/conf/Catalina /usr/local/tomcat/logs /usr/local/tomcat/work /usr/local/tomcat/temp /usr/local/tomcat/webapps
+# The secrets are in ROOT.xml now, and nothing reads them from the environment at runtime (the server has no
+# System.getenv), so keep them out of the environment Tomcat inherits (/proc/<pid>/environ). JAVA_OPTS and CATALINA_OPTS
+# stay: catalina.sh reads them.
+unset DB_PASSWORD HASH_SECRET JWT_SECRET SMTP_PASSWORD
 exec setpriv --reuid=mdmesh --regid=mdmesh --init-groups catalina.sh run
