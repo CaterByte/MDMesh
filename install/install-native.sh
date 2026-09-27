@@ -232,12 +232,15 @@ kill_svc_user() {
 }
 # Stops the install if $SVC_USER has a crontab or pending at jobs: cron or atd could start one as $SVC_USER at any moment,
 # racing the root writes, and kill_svc_user cannot stop a process that does not exist yet. The account is a system
-# account this script created, and it never legitimately has either. Called after kill_svc_user, so no process of the
-# account is left to schedule a new job between the check and the writes. Comment-only crontab lines run nothing and
-# are ignored. The jobs are not printed: the account wrote them, and they are not for root's terminal.
+# account this script created, and it never legitimately has either. Called twice: first before anything is changed
+# (right after the port preflight), so the usual refusal leaves the running install untouched; then again after
+# kill_svc_user (argument "stopped"), because a process of the account could have added a job in between, and after the
+# kill none is left to add another before the writes. That second refusal comes after Tomcat and the supervisor were
+# stopped, so it says so and how to start them. Comment-only crontab lines run nothing and are ignored. The jobs are
+# not printed: the account wrote them, and they are not for root's terminal.
 refuse_svc_user_jobs() {
   id -u "$SVC_USER" >/dev/null 2>&1 || return 0
-  local cron=0 at=0
+  local cron=0 at=0 u units=
   if command -v crontab >/dev/null 2>&1; then
     cron=$(crontab -l -u "$SVC_USER" 2>/dev/null | grep -cvE '^[[:space:]]*(#|$)' || true)
   fi
@@ -250,6 +253,16 @@ refuse_svc_user_jobs() {
   [ "${cron:-0}" -gt 0 ] && printf '    • a crontab with %s job line(s). Inspect: crontab -l -u %s   Remove: crontab -r -u %s\n' "$cron" "$SVC_USER" "$SVC_USER"
   [ "${at:-0}" -gt 0 ] && printf '    • %s at job(s). Inspect: atq, then at -c <id>   Remove: atrm <id>\n' "$at"
   printf '  Find out how they got there (it can mean the server was compromised), remove them, then re-run.\n'
+  if [ "${1:-}" = stopped ]; then
+    printf '  %sThe server and the updater supervisor are stopped now%s: this run stopped them before it found the jobs.\n' "$c_yel" "$c_reset"
+    printf '    Re-running this installer (after removing the jobs) finishes the upgrade and starts them.\n'
+    for u in "$SVC_UNIT" "$SUP_UNIT"; do unit_installed "$u" && units="$units $u"; done
+    if [ -n "$units" ]; then
+      printf '    To start them again as they were:  systemctl start%s\n' "$units"
+      printf '    (this run already set a new password on the database role, which the old server config does not\n'
+      printf '    have, so the server cannot connect to the database until the installer completes).\n'
+    fi
+  fi
   exit 1
 }
 # svc_cat FILE: FILE's contents, read as $SVC_USER. For files in the trees that account owns: root would follow a link
@@ -320,6 +333,9 @@ stop_tomcat() {
 # Fail fast on a port conflict, before packages are installed, the build runs or the running server is
 # stopped — losing the bind later would leave our Tomcat dead while the other server answers with 404s.
 [ "$(port_owner)" = foreign ] && refuse_foreign_port
+# Likewise refuse on scheduled jobs of the service account now, while the running install is untouched (it is checked
+# again after the stop below, which closes the gap; see refuse_svc_user_jobs).
+refuse_svc_user_jobs
 
 # Upgrades re-run this script. hash.secret signs enrollment/sync requests and download URLs, so rotating
 # it would silently break every already-enrolled device; reuse the value from the existing ROOT.xml.
@@ -534,7 +550,7 @@ step "Tomcat 9 + app deploy"
 stop_tomcat
 stop_supervisor
 kill_svc_user
-refuse_svc_user_jobs
+refuse_svc_user_jobs stopped
 # Install Tomcat if it's missing OR a previous run left it partial/corrupt. Check for the actual launcher
 # script, not just the directory, so a broken /opt/mdmesh-tc self-heals instead of failing at startup.
 # archive.apache.org keeps every release permanently, so the pinned version URL never rots.
