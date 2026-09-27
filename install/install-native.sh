@@ -154,9 +154,12 @@ SUP_ENV_DIR=/etc/mdmesh
 # component of ROOT/REL is a symbolic link. write_under ROOT REL CMD... guards REL, runs CMD with its stdout going to a
 # fresh mode-600 file (mktemp) in REL's directory, and renames that over REL in one step (mv -fT never follows a link or
 # descends into a directory there). Temp files a killed run left behind are removed first (ROOT.xml's hold its
-# secrets). tc_guard/tc_write REL and base_guard/base_write REL are these for $CATALINA and $BASE_DIR. Tomcat and the
-# supervisor (both run as $SVC_USER) are stopped, and every other $SVC_USER process killed (kill_svc_user), before these
-# run; the two are started after the last one, so no $SVC_USER process can race them.
+# secrets). tc_guard/tc_write REL and base_guard/base_write REL are these for $CATALINA and $BASE_DIR. Before these run,
+# Tomcat and the supervisor (both run as $SVC_USER) are stopped, every other $SVC_USER process is killed (kill_svc_user),
+# and the install stops if the account has a crontab or at jobs that could start a new one (refuse_svc_user_jobs); the
+# two units are started again after the last write. That leaves only a process that some other root service starts as
+# $SVC_USER in between, which none does unless an admin set one up. So these guards stay, and root reads the files in
+# these trees as $SVC_USER (svc_cat) rather than trusting that nothing can race it.
 guard_under() {
   local root="$1" p="$1" part
   local -a parts
@@ -226,6 +229,28 @@ kill_svc_user() {
     sleep 0.2
   done
   _fail "Could not stop every $SVC_USER process (still running: $(svc_user_pids | tr '\n' ' ')). Stop them and re-run."
+}
+# Stops the install if $SVC_USER has a crontab or pending at jobs: cron or atd could start one as $SVC_USER at any moment,
+# racing the root writes, and kill_svc_user cannot stop a process that does not exist yet. The account is a system
+# account this script created, and it never legitimately has either. Called after kill_svc_user, so no process of the
+# account is left to schedule a new job between the check and the writes. Comment-only crontab lines run nothing and
+# are ignored. The jobs are not printed: the account wrote them, and they are not for root's terminal.
+refuse_svc_user_jobs() {
+  id -u "$SVC_USER" >/dev/null 2>&1 || return 0
+  local cron=0 at=0
+  if command -v crontab >/dev/null 2>&1; then
+    cron=$(crontab -l -u "$SVC_USER" 2>/dev/null | grep -cvE '^[[:space:]]*(#|$)' || true)
+  fi
+  if command -v atq >/dev/null 2>&1; then
+    at=$(atq 2>/dev/null | awk -v u="$SVC_USER" '$NF == u' | grep -c . || true)
+  fi
+  { [ "${cron:-0}" -gt 0 ] || [ "${at:-0}" -gt 0 ]; } || return 0
+  printf '\n  %s✗ the %s account has scheduled jobs%s: cron or at would run them as %s while this installer writes to\n' "$c_red" "$SVC_USER" "$c_reset" "$SVC_USER"
+  printf '    its files. It is a system account this installer created, and it never has jobs of its own.\n'
+  [ "${cron:-0}" -gt 0 ] && printf '    • a crontab with %s job line(s). Inspect: crontab -l -u %s   Remove: crontab -r -u %s\n' "$cron" "$SVC_USER" "$SVC_USER"
+  [ "${at:-0}" -gt 0 ] && printf '    • %s at job(s). Inspect: atq, then at -c <id>   Remove: atrm <id>\n' "$at"
+  printf '  Find out how they got there (it can mean the server was compromised), remove them, then re-run.\n'
+  exit 1
 }
 # svc_cat FILE: FILE's contents, read as $SVC_USER. For files in the trees that account owns: root would follow a link
 # planted there and read any root-only file. Before the account exists (a fresh install, or an upgrade from a version
@@ -500,9 +525,11 @@ step "Tomcat 9 + app deploy"
 stop_tomcat
 stop_supervisor
 kill_svc_user
+refuse_svc_user_jobs
 # Install Tomcat if it's missing OR a previous run left it partial/corrupt. Check for the actual launcher
 # script, not just the directory, so a broken /opt/mdmesh-tc self-heals instead of failing at startup.
 # archive.apache.org keeps every release permanently, so the pinned version URL never rots.
+TC_FRESH=0   # 1 when root unpacks Tomcat below (see the server.xml read)
 if [ ! -x "$CATALINA/bin/catalina.sh" ]; then
   # A fresh private temp file (not a fixed /tmp name) and Apache's published SHA-512; extracted with root's own
   # ownership and umask, never the archive's.
@@ -517,14 +544,20 @@ if [ ! -x "$CATALINA/bin/catalina.sh" ]; then
   tar xzf "$TC_TGZ" -C "$CATALINA" --strip-components=1 --no-same-owner --no-same-permissions
   rm -f "$TC_TGZ"
   [ -x "$CATALINA/bin/catalina.sh" ] || _fail "Tomcat extract (catalina.sh missing after unpack)"
+  TC_FRESH=1
   ok "Apache Tomcat ${TOMCAT_VER} installed at $CATALINA"
 else
   info "Apache Tomcat already present at $CATALINA"
 fi
 # Point Tomcat's HTTP connector at the chosen port. Idempotent across re-runs: rewrite whatever numeric
 # port currently sits on the HTTP/1.1 connector (leaves the shutdown/AJP ports untouched).
-# tc_write checks for links before sed reads the file, so a link there is not read through either.
-tc_write conf/server.xml sed -E "s#(<Connector port=\")[0-9]+(\" protocol=\"HTTP/1.1\")#\1${HTTP_PORT}\2#" "$CATALINA/conf/server.xml"
+# The file is read first, as $SVC_USER (svc_cat: root never opens a file in that account's tree), unless root unpacked
+# this Tomcat just above (then the file is root's own, mode 600, and no $SVC_USER process has run since). tc_write then
+# refuses a link there and replaces the file without following one.
+if [ "$TC_FRESH" = 1 ]; then _server_xml=$(cat -- "$CATALINA/conf/server.xml")
+else _server_xml=$(svc_cat "$CATALINA/conf/server.xml" 2>>"$LOGFILE"); fi \
+  || _fail "Could not read $CATALINA/conf/server.xml as $SVC_USER: if it is a symbolic link, remove it; if root owns it (a run that stopped before handing the tree over), run chown -R $SVC_USER:$SVC_USER $CATALINA. Then re-run."
+tc_write conf/server.xml sed -E "s#(<Connector port=\")[0-9]+(\" protocol=\"HTTP/1.1\")#\1${HTTP_PORT}\2#" <<< "$_server_xml"
 info "HTTP port set to ${HTTP_PORT}"
 tc_guard webapps   # the glob below would otherwise empty a linked directory's target as root
 rm -rf "$CATALINA"/webapps/*
