@@ -488,10 +488,18 @@ kill_svc_user
 # script, not just the directory, so a broken /opt/mdmesh-tc self-heals instead of failing at startup.
 # archive.apache.org keeps every release permanently, so the pinned version URL never rots.
 if [ ! -x "$CATALINA/bin/catalina.sh" ]; then
-  run "Downloading Apache Tomcat ${TOMCAT_VER}" \
-    curl -fsSL --retry 3 "https://archive.apache.org/dist/tomcat/tomcat-9/v${TOMCAT_VER}/bin/apache-tomcat-${TOMCAT_VER}.tar.gz" -o /tmp/tc.tgz
+  # A fresh private temp file (not a fixed /tmp name) and Apache's published SHA-512; extracted with root's own
+  # ownership and umask, never the archive's.
+  TC_URL="https://archive.apache.org/dist/tomcat/tomcat-9/v${TOMCAT_VER}/bin/apache-tomcat-${TOMCAT_VER}.tar.gz"
+  TC_TGZ=$(mktemp)
+  run "Downloading Apache Tomcat ${TOMCAT_VER}" curl -fsSL --retry 3 "$TC_URL" -o "$TC_TGZ"
+  TC_SHA=$(curl -fsSL --retry 3 "$TC_URL.sha512" | awk 'NR == 1 {print $1}') || TC_SHA=   # no early exit: SIGPIPE under pipefail
+  if [ -z "$TC_SHA" ] || [ "$(sha512sum "$TC_TGZ" | awk '{print $1}')" != "$TC_SHA" ]; then
+    rm -f "$TC_TGZ"; _fail "Tomcat download does not match Apache's published SHA-512"
+  fi
   rm -rf "$CATALINA"; mkdir -p "$CATALINA"
-  tar xzf /tmp/tc.tgz -C "$CATALINA" --strip-components=1
+  tar xzf "$TC_TGZ" -C "$CATALINA" --strip-components=1 --no-same-owner --no-same-permissions
+  rm -f "$TC_TGZ"
   [ -x "$CATALINA/bin/catalina.sh" ] || _fail "Tomcat extract (catalina.sh missing after unpack)"
   ok "Apache Tomcat ${TOMCAT_VER} installed at $CATALINA"
 else
