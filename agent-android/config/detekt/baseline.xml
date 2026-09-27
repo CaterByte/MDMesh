@@ -1,0 +1,146 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>EmptyFunctionBlock:CheckInCoordinatorTest.kt$CheckInCoordinatorTest.&lt;no name provided&gt;${}</ID>
+    <ID>EmptyFunctionBlock:ConfigApplierTest.kt$ConfigApplierTest.NoHome${}</ID>
+    <ID>EmptyFunctionBlock:ConfigApplyHandlerTest.kt$ConfigApplyHandlerTest.NoHome${}</ID>
+    <ID>EmptyFunctionBlock:FakeAgentDeps.kt$NoopEventSink${}</ID>
+    <ID>ForbiddenComment:AdminPolicyComplianceActivity.kt$AdminPolicyComplianceActivity$// TODO: enforce mandatory baseline policy here before returning RESULT_OK.</ID>
+    <ID>ForbiddenComment:InputInjectionService.kt$InputInjectionService$// TODO: dispatchGesture(...) wiring lands with the remote-control input channel.</ID>
+    <ID>InstanceOfCheckForException:CheckInCoordinator.kt$CheckInCoordinator$t !is CancellationException</ID>
+    <ID>LongParameterList:CapabilityCollector.kt$CapabilityCollector$( private val agentVersion: String, private val agentPackage: String, private val isDeviceOwner: () -&gt; Boolean, private val policyKeys: () -&gt; List&lt;String&gt;, private val remoteControl: () -&gt; RemoteControlCapability, private val oem: () -&gt; OemCapability, private val deviceOwnerAppManagementKeys: List&lt;String&gt; = emptyList(), private val deviceActionKeys: List&lt;String&gt; = emptyList(), private val buildInfo: BuildInfo = BuildInfo.fromAndroid(), )</ID>
+    <ID>LongParameterList:CheckInCoordinator.kt$CheckInCoordinator$( private val api: MdmApi, private val enrollment: EnrollmentManager, private val identity: DeviceIdentity, private val capabilitySource: CapabilitySource, private val dispatcher: CommandDispatcher, private val pending: PendingResults, private val stateSource: DeviceStateSource, private val telemetrySource: TelemetrySource, private val eventSink: EventSink, private val hardwareIdSource: HardwareIdSource = HardwareIdSource { null }, private val syncStatus: SyncStatus = SyncStatus(), )</ID>
+    <ID>LoopWithTooManyJumpStatements:KioskLauncherActivity.kt$KioskLauncherActivity$for</ID>
+    <ID>MagicNumber:AppInventoryCollector.kt$AppInventoryCollector$100</ID>
+    <ID>MagicNumber:CheckInService.kt$CheckInService$1000L</ID>
+    <ID>MagicNumber:CheckInService.kt$CheckInService$120</ID>
+    <ID>MagicNumber:CheckInService.kt$CheckInService$1_000L</ID>
+    <ID>MagicNumber:CheckInService.kt$CheckInService$2_500L</ID>
+    <ID>MagicNumber:CheckInService.kt$CheckInService$3</ID>
+    <ID>MagicNumber:CheckInWorker.kt$CheckInWorker.Companion$30</ID>
+    <ID>MagicNumber:CommandDispatcher.kt$CommandDispatcher$1000</ID>
+    <ID>MagicNumber:DeviceRingHandler.kt$DeviceRingHandler$30_000L</ID>
+    <ID>MagicNumber:DeviceStateCollector.kt$DeviceStateCollector.Companion$100</ID>
+    <ID>MagicNumber:DynamicStateCollector.kt$DynamicStateCollector$0xff</ID>
+    <ID>MagicNumber:DynamicStateCollector.kt$DynamicStateCollector$16</ID>
+    <ID>MagicNumber:DynamicStateCollector.kt$DynamicStateCollector$24</ID>
+    <ID>MagicNumber:DynamicStateCollector.kt$DynamicStateCollector$60_000</ID>
+    <ID>MagicNumber:DynamicStateCollector.kt$DynamicStateCollector$8</ID>
+    <ID>MagicNumber:DynamicStateCollector.kt$DynamicStateCollector.Companion$100</ID>
+    <ID>MagicNumber:InstallManager.kt$InstallManager$0x7fff_ffff</ID>
+    <ID>MagicNumber:InstallManager.kt$InstallManager$1024</ID>
+    <ID>MagicNumber:InstallManager.kt$InstallManager$64</ID>
+    <ID>MagicNumber:KioskLauncherActivity.kt$KioskLauncherActivity$10</ID>
+    <ID>MagicNumber:KioskLauncherActivity.kt$KioskLauncherActivity$12</ID>
+    <ID>MagicNumber:KioskLauncherActivity.kt$KioskLauncherActivity$12f</ID>
+    <ID>MagicNumber:KioskLauncherActivity.kt$KioskLauncherActivity$14f</ID>
+    <ID>MagicNumber:KioskLauncherActivity.kt$KioskLauncherActivity$16</ID>
+    <ID>MagicNumber:KioskLauncherActivity.kt$KioskLauncherActivity$18f</ID>
+    <ID>MagicNumber:KioskLauncherActivity.kt$KioskLauncherActivity$20f</ID>
+    <ID>MagicNumber:KioskLauncherActivity.kt$KioskLauncherActivity$22f</ID>
+    <ID>MagicNumber:KioskLauncherActivity.kt$KioskLauncherActivity$24</ID>
+    <ID>MagicNumber:KioskLauncherActivity.kt$KioskLauncherActivity$28</ID>
+    <ID>MagicNumber:KioskLauncherActivity.kt$KioskLauncherActivity$28f</ID>
+    <ID>MagicNumber:KioskLauncherActivity.kt$KioskLauncherActivity$56</ID>
+    <ID>MagicNumber:KioskLauncherActivity.kt$KioskLauncherActivity$6</ID>
+    <ID>MagicNumber:KioskLauncherActivity.kt$KioskLauncherActivity$72</ID>
+    <ID>MagicNumber:KioskLauncherActivity.kt$KioskLauncherActivity$96</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$0.10f</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$11f</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$12f</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$13f</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$14f</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$15f</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$16</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$16f</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$20</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$24</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$28</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$30f</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$4</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$40</ID>
+    <ID>MagicNumber:ResetPasswordTokenStore.kt$ResetPasswordTokenStore$32</ID>
+    <ID>MagicNumber:TransportManager.kt$TransportManager$1_000L</ID>
+    <ID>MagicNumber:TransportManager.kt$TransportManager$5</ID>
+    <ID>MagicNumber:TransportManager.kt$TransportManager$50</ID>
+    <ID>MagicNumber:TransportManager.kt$TransportManager$60_000L</ID>
+    <ID>MagicNumber:UserRestrictions.kt$UserRestrictions$21</ID>
+    <ID>MagicNumber:UserRestrictions.kt$UserRestrictions$26</ID>
+    <ID>MagicNumber:WakeKeepAlive.kt$WakeKeepAlive$10</ID>
+    <ID>MatchingDeclarationName:KioskFeatures.kt$KioskToggles</ID>
+    <ID>MatchingDeclarationName:TelemetryCollector.kt$TelemetrySource</ID>
+    <ID>MaxLineLength:AgentEndpoints.kt$AgentDeviceStateDto$/** Revision of the last desired-state document the agent fully applied; null until the first successful config.apply. */</ID>
+    <ID>MaxLineLength:AppIconsHandler.kt$AppIconsHandler$return CommandResults.done(command, ProtocolJson.json.encodeToString(AppIconsResult.serializer(), AppIconsResult()))</ID>
+    <ID>MaxLineLength:AppInventoryCollector.kt$AppInventoryCollector$label = ai?.let { runCatching { pm.getApplicationLabel(it).toString() }.getOrNull() } ?: pi.packageName</ID>
+    <ID>MaxLineLength:AppInventoryCollector.kt$AppInventoryCollector$val code = if (Build.VERSION.SDK_INT &gt;= Build.VERSION_CODES.P) pi.longVersionCode else pi.versionCode.toLong()</ID>
+    <ID>MaxLineLength:AppInventoryTest.kt$AppInventoryTest$AppInfo("com.android.settings", "Settings", system = true, launchable = true, versionName = "14", versionCode = 34)</ID>
+    <ID>MaxLineLength:CapabilityCollectorTest.kt$CapabilityCollectorTest$private</ID>
+    <ID>MaxLineLength:ConfigApplierTest.kt$ConfigApplierTest$.</ID>
+    <ID>MaxLineLength:ConfigApplierTest.kt$ConfigApplierTest$NoHome : KioskHomeSwitch</ID>
+    <ID>MaxLineLength:ConfigApplierTest.kt$ConfigApplierTest$assertNull(ConfigApplier(emptyMap(), kiosk(FakeController()), {}, InMemoryConfigStateStore()).reapplyPersisted())</ID>
+    <ID>MaxLineLength:ConfigApplierTest.kt$ConfigApplierTest$val</ID>
+    <ID>MaxLineLength:ConfigApplierTest.kt$ConfigApplierTest$val r1 = a.apply(ConfigApplyPayload(revision = "k1", kiosk = KioskApplyPayload(mode = "single", pinPackage = "com.a")))</ID>
+    <ID>MaxLineLength:ConfigApplierTest.kt$ConfigApplierTest.FakeController$override fun enter(homeComponent: ComponentName, allowedPackages: List&lt;String&gt;, features: Int): KioskResult</ID>
+    <ID>MaxLineLength:ConfigApplyHandler.kt$ConfigApplyHandler$return if (ConfigApplier.succeeded(result)) CommandResults.done(command, detail) else CommandResults.failed(command, detail)</ID>
+    <ID>MaxLineLength:ConfigApplyHandlerTest.kt$ConfigApplyHandlerTest$KioskApplier(StubKioskController(), InMemoryKioskStateStore(), NoHome, ComponentName("a", "b"))</ID>
+    <ID>MaxLineLength:ConfigApplyHandlerTest.kt$ConfigApplyHandlerTest$NoHome : KioskHomeSwitch</ID>
+    <ID>MaxLineLength:ConfigApplyHandlerTest.kt$ConfigApplyHandlerTest$assertEquals("failed: x", ProtocolJson.json.decodeFromString(ConfigApplyResult.serializer(), r.detail!!).outcomes["policies.wifi"])</ID>
+    <ID>MaxLineLength:ConfigApplyHandlerTest.kt$ConfigApplyHandlerTest$assertEquals(CommandStatus.FAILED, handler(PolicyOutcome.Applied).handle(cmd(buildJsonObject { put("revision", 5) })).status)</ID>
+    <ID>MaxLineLength:ConfigApplyHandlerTest.kt$ConfigApplyHandlerTest$private fun cmd(payload: kotlinx.serialization.json.JsonObject?)</ID>
+    <ID>MaxLineLength:ConfigApplyHandlerTest.kt$ConfigApplyHandlerTest$private val doc = buildJsonObject { put("revision", "r1"); put("configurationId", 1); putJsonObject("policies") { put("wifi", true) } }</ID>
+    <ID>MaxLineLength:ConfigApplyHandlerTest.kt$ConfigApplyHandlerTest.Toggle$override val capabilityKey = "wifi";</ID>
+    <ID>MaxLineLength:ConfigCommandTest.kt$ConfigCommandTest$val dto = AgentDeviceStateDto(battery = 1, charging = false, locked = false, kioskActive = false, androidRelease = "14", lastBootAt = 0L, appliedConfigRevision = "r1")</ID>
+    <ID>MaxLineLength:ConfigCommandTest.kt$ConfigCommandTest$val p = ProtocolJson.json.decodeFromString(ConfigApplyPayload.serializer(), """{"revision":"r","configurationId":1}""")</ID>
+    <ID>MaxLineLength:ConfigCommandTest.kt$ConfigCommandTest$val s = ProtocolJson.json.encodeToString(ConfigApplyResult("r1", mapOf("policies.wifi" to ConfigOutcome.APPLIED, "kiosk" to ConfigOutcome.failed("nope"))))</ID>
+    <ID>MaxLineLength:IdentityCollector.kt$IdentityCollector$if (Build.VERSION.SDK_INT &gt;= Build.VERSION_CODES.O) Build.getSerial() else @Suppress("DEPRECATION") Build.SERIAL</ID>
+    <ID>MaxLineLength:KioskApplier.kt$KioskApplier$systemInfo = p.features.systemInfo</ID>
+    <ID>MaxLineLength:KioskApplierTest.kt$KioskApplierTest$val r = KioskApplier(c, store, h, home).enter(KioskApplyPayload(mode = "single", pinPackage = "com.a", allowedPackages = listOf("com.a")))</ID>
+    <ID>MaxLineLength:KioskApplierTest.kt$KioskApplierTest.FakeController$override fun enter(homeComponent: ComponentName, allowedPackages: List&lt;String&gt;, features: Int): KioskResult</ID>
+    <ID>MaxLineLength:KioskApplierTest.kt$KioskApplierTest.FakeController$private</ID>
+    <ID>MaxLineLength:KioskHomeSwitch.kt$AndroidKioskHomeSwitch$runCatching { context.startActivity(Intent().setComponent(homeComponent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }</ID>
+    <ID>MaxLineLength:KioskHomeSwitch.kt$AndroidKioskHomeSwitch$runCatching { context.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }</ID>
+    <ID>MaxLineLength:KioskHomeSwitch.kt$AndroidKioskHomeSwitch$val state = if (enabled) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED</ID>
+    <ID>MaxLineLength:VersionPolicyTest.kt$VersionPolicyTest$assertEquals(Decision.Install, VersionPolicy.shouldInstall(installedVersionCode = 9L, requestedVersionCode = 10L))</ID>
+    <ID>MaxLineLength:VersionPolicyTest.kt$VersionPolicyTest$assertEquals(Decision.Install, VersionPolicy.shouldInstall(installedVersionCode = null, requestedVersionCode = 0L))</ID>
+    <ID>MaxLineLength:VersionPolicyTest.kt$VersionPolicyTest$assertEquals(Decision.Install, VersionPolicy.shouldInstall(installedVersionCode = null, requestedVersionCode = 10L))</ID>
+    <ID>MaxLineLength:VersionPolicyTest.kt$VersionPolicyTest$assertEquals(Decision.Install, VersionPolicy.shouldInstall(installedVersionCode = null, requestedVersionCode = null))</ID>
+    <ID>NestedBlockDepth:InstallManager.kt$InstallManager$suspend fun install(req: InstallRequest): InstallOutcome</ID>
+    <ID>ReturnCount:AdminReceiver.kt$AdminReceiver$private fun protectAgentProcess(context: Context)</ID>
+    <ID>ReturnCount:AdminReceiver.kt$AdminReceiver$private fun setStableOrganizationId(context: Context)</ID>
+    <ID>ReturnCount:AppIconsHandler.kt$AppIconsHandler$override suspend fun handle(command: CommandEnvelope): CommandResult</ID>
+    <ID>ReturnCount:AppInstallHandler.kt$AppInstallHandler$override suspend fun handle(command: CommandEnvelope): CommandResult</ID>
+    <ID>ReturnCount:AppUninstallHandler.kt$AppUninstallHandler$override suspend fun handle(command: CommandEnvelope): CommandResult</ID>
+    <ID>ReturnCount:CheckInWorker.kt$CheckInWorker$private fun isTerminalEnrollmentRejection(t: Throwable): Boolean</ID>
+    <ID>ReturnCount:CommandDispatcher.kt$CommandDispatcher$private fun isExpired(command: CommandEnvelope): Boolean</ID>
+    <ID>ReturnCount:CommandDispatcher.kt$CommandDispatcher$suspend fun dispatch(command: CommandEnvelope): CommandResult</ID>
+    <ID>ReturnCount:ConfigApplyHandler.kt$ConfigApplyHandler$override suspend fun handle(command: CommandEnvelope): CommandResult</ID>
+    <ID>ReturnCount:CrashLoopGuard.kt$CrashLoopGuard$fun isCrashLoopDetected(): Boolean</ID>
+    <ID>ReturnCount:DeviceRebootHandler.kt$DeviceRebootHandler$override suspend fun handle(command: CommandEnvelope): CommandResult</ID>
+    <ID>ReturnCount:DynamicStateCollector.kt$DynamicStateCollector$@Suppress("DEPRECATION") @SuppressLint("MissingPermission") // ACCESS_NETWORK_STATE is declared in the app manifest private fun networkInfo(): Net</ID>
+    <ID>ReturnCount:InstallManager.kt$InstallManager$suspend fun install(req: InstallRequest): InstallOutcome</ID>
+    <ID>ReturnCount:LocationCollector.kt$LocationCollector$@SuppressLint("MissingPermission") // gated by collect()'s hasPermission() check private fun currentFix(lm: LocationManager): Location?</ID>
+    <ID>ReturnCount:LocationCollector.kt$LocationCollector$fun collect(): LocationDto?</ID>
+    <ID>ReturnCount:LockTaskKioskController.kt$LockTaskKioskController$override fun allowedPackages(): List&lt;String&gt;</ID>
+    <ID>ReturnCount:PolicyApplyHandler.kt$PolicyApplyHandler$override suspend fun handle(command: CommandEnvelope): CommandResult</ID>
+    <ID>ReturnCount:PolicyManager.kt$PolicyManager$fun applyRestriction(key: String, enabled: Boolean): PolicyOutcome</ID>
+    <ID>ReturnCount:PolicyManager.kt$PolicyManager$fun setKeyguardDisabled(disabled: Boolean): PolicyOutcome</ID>
+    <ID>ReturnCount:PolicyManager.kt$PolicyManager$fun setPermissionAutoGrant(): PolicyOutcome</ID>
+    <ID>ReturnCount:PolicyManager.kt$PolicyManager$fun setStatusBarDisabled(disabled: Boolean): PolicyOutcome</ID>
+    <ID>ReturnCount:PolicyManager.kt$PolicyManager$fun setSystemUpdateAutomatic(): PolicyOutcome</ID>
+    <ID>ReturnCount:ResetPasswordTokenStore.kt$ResetPasswordTokenStore$fun ensureToken(): ByteArray</ID>
+    <ID>ReturnCount:VersionPolicy.kt$VersionPolicy$fun shouldInstall(installedVersionCode: Long?, requestedVersionCode: Long?): Decision</ID>
+    <ID>SwallowedException:LockTaskKioskController.kt$LockTaskKioskController$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:CheckInCoordinator.kt$CheckInCoordinator$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:InstallManager.kt$InstallManager$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:KeepAliveReceiver.kt$KeepAliveReceiver$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:LockTaskKioskController.kt$LockTaskKioskController$t: Throwable</ID>
+    <ID>TooManyFunctions:AgentModule.kt$AgentModule</ID>
+    <ID>TooManyFunctions:InstallManager.kt$InstallManager</ID>
+    <ID>TooManyFunctions:KioskLauncherActivity.kt$KioskLauncherActivity : ComponentActivity</ID>
+    <ID>TooManyFunctions:MainActivity.kt$MainActivity : ComponentActivity</ID>
+    <ID>UseCheckOrError:CommandDispatcherTest.kt$CommandDispatcherTest.&lt;no name provided&gt;$throw IllegalStateException("kaboom")</ID>
+    <ID>WildcardImport:ConfigApplierTest.kt$import org.junit.Assert.*</ID>
+    <ID>WildcardImport:KioskApplierTest.kt$import org.junit.Assert.*</ID>
+  </CurrentIssues>
+</SmellBaseline>

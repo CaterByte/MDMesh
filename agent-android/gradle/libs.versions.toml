@@ -4,6 +4,8 @@ agp = "8.6.0"
 kotlin = "2.0.20"
 ksp = "2.0.20-1.0.25"
 desugarJdkLibs = "2.1.2"
+# Static analysis (root-level `detekt` task; baseline in config/detekt/)
+detekt = "1.23.8"
 
 # AndroidX core
 coreKtx = "1.13.1"
@@ -81,3 +83,4 @@ kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
+detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
