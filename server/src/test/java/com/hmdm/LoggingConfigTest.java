@@ -20,10 +20,10 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Pins the server's only log4j config (src/main/resources/log4j.xml, the one a fresh JVM loads before any webapp code
- * runs): INFO, stdout only, and the audit plugin's "AuditLogger" events on stdout at INFO. It used to ship root DEBUG,
- * which flooded every production start (tens of thousands of lines) and logged each SQL statement. The file is loaded
- * into a private Hierarchy, so the test does not depend on how other tests initialised log4j.
+ * Pins the server's only log4j config (src/main/resources/log4j.xml, which log4j loads from the classpath when the
+ * first logger is created): INFO, stdout only, and the audit plugin's "AuditLogger" events on stdout at INFO. It used
+ * to ship root DEBUG, which flooded every production start (tens of thousands of lines) and logged each SQL statement.
+ * The file is loaded into a private Hierarchy, so the test does not depend on how other tests initialised log4j.
  */
 public class LoggingConfigTest {
 

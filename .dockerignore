@@ -17,7 +17,8 @@ server/build.properties
 server/src/main/webapp/lib
 server/webtarget
 **/bower_components
-# Local dev-run base directory (rotated logs), wherever a run left it.
+# Log files that local dev runs wrote under the literal _BASE_DIRECTORY_ placeholder path before the server logged to
+# stdout only; old checkouts may still hold them, wherever a run left them.
 **/_BASE_DIRECTORY_
 reference
 brain
