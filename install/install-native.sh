@@ -143,33 +143,38 @@ TOMCAT_VER=9.0.89
 export CATALINA_PID="$CATALINA/tomcat.pid"
 SVC_USER=mdmesh            # unprivileged account Tomcat runs as (mirrors the Docker image)
 SVC_UNIT=mdmesh-server     # systemd unit that owns Tomcat
-# Root writes into $CATALINA, which this script chowns to $SVC_USER (on this run and on every earlier one), so a link
-# planted there must never be followed. tc_guard REL refuses (fails the install) when $CATALINA or any component of
-# $CATALINA/REL is a symbolic link. tc_write REL CMD... guards REL, runs CMD with its stdout going to a fresh mode-600
-# file (mktemp) in REL's directory, and renames that over REL in one step (mv -fT never follows a link or descends
-# into a directory there). Temp files a killed run left behind are removed first (ROOT.xml's hold its secrets). Tomcat
-# is stopped before these run, so no $SVC_USER process can race them.
-tc_guard() {
-  local p="$CATALINA" part
+# Root writes into $CATALINA and $BASE_DIR, which this script chowns to $SVC_USER (on this run and on every earlier one),
+# so a link planted there must never be followed. guard_under ROOT REL refuses (fails the install) when ROOT or any
+# component of ROOT/REL is a symbolic link. write_under ROOT REL CMD... guards REL, runs CMD with its stdout going to a
+# fresh mode-600 file (mktemp) in REL's directory, and renames that over REL in one step (mv -fT never follows a link or
+# descends into a directory there). Temp files a killed run left behind are removed first (ROOT.xml's hold its
+# secrets). tc_guard/tc_write REL and base_guard/base_write REL are these for $CATALINA and $BASE_DIR. Tomcat is stopped
+# before these run, so no $SVC_USER process can race them.
+guard_under() {
+  local root="$1" p="$1" part
   local -a parts
-  IFS=/ read -r -a parts <<< "$1"
-  if [ -L "$p" ]; then _fail "Refusing to write under $CATALINA: it is a symbolic link. Remove it and re-run."; fi
+  IFS=/ read -r -a parts <<< "$2"
+  if [ -L "$p" ]; then _fail "Refusing to write under $root: it is a symbolic link. Remove it and re-run."; fi
   for part in "${parts[@]}"; do
     p="$p/$part"
-    if [ -L "$p" ]; then _fail "Refusing to write $CATALINA/$1: $p is a symbolic link (the service user owns this tree). Remove it and re-run."; fi
+    if [ -L "$p" ]; then _fail "Refusing to write $root/$2: $p is a symbolic link (the service user owns this tree). Remove it and re-run."; fi
   done
 }
-tc_write() {
-  local rel="$1" tmp
-  shift
-  tc_guard "$rel"
-  mkdir -p "$(dirname "$CATALINA/$rel")"
-  rm -f "$CATALINA/$rel".??????
-  tmp=$(mktemp "$CATALINA/$rel.XXXXXX")
-  if "$@" > "$tmp" && chmod 600 "$tmp" && mv -fT "$tmp" "$CATALINA/$rel"; then return 0; fi
+write_under() {
+  local root="$1" rel="$2" tmp
+  shift 2
+  guard_under "$root" "$rel"
+  mkdir -p "$(dirname "$root/$rel")"
+  rm -f "$root/$rel".??????
+  tmp=$(mktemp "$root/$rel.XXXXXX")
+  if "$@" > "$tmp" && chmod 600 "$tmp" && mv -fT "$tmp" "$root/$rel"; then return 0; fi
   rm -f "$tmp"
-  _fail "Could not write $CATALINA/$rel"
+  _fail "Could not write $root/$rel"
 }
+tc_guard()   { guard_under "$CATALINA" "$1"; }
+tc_write()   { local rel="$1"; shift; write_under "$CATALINA" "$rel" "$@"; }
+base_guard() { guard_under "$BASE_DIR" "$1"; }
+base_write() { local rel="$1"; shift; write_under "$BASE_DIR" "$rel" "$@"; }
 have_systemd() { command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; }
 port_holder() {
   if command -v ss >/dev/null 2>&1; then ss -ltnp 2>/dev/null | awk -v p=":$HTTP_PORT$" '$4 ~ p {print; exit}'
@@ -443,10 +448,15 @@ cp -a "$REPO"/web/dist/. "$CATALINA/webapps/ROOT/"   # index.html + assets at / 
 # Paired with the RewriteValve declared in ROOT.xml above.
 tc_write webapps/ROOT/WEB-INF/rewrite.config \
   printf 'RewriteCond %%{REQUEST_URI} !-f\nRewriteRule ^/(?!rest|files|agent|update|healthz(?:/|$))(.*)$ /index.html\n'
+# $BASE_DIR is the service user's tree too: every root write there goes through base_guard/base_write (see tc_guard).
+base_guard files; base_guard plugins
 mkdir -p "$BASE_DIR/files" "$BASE_DIR/plugins"   # tc_write creates conf/Catalina/localhost after checking for links
-cp -r install/emails "$BASE_DIR/" 2>/dev/null || true
+# The email templates, one guarded write per file: a link planted anywhere under emails/ stops the install.
+while IFS= read -r -d '' _email; do
+  base_write "${_email#"$REPO/install/"}" cat "$_email"
+done < <(find "$REPO/install/emails" -type f -print0)
 # Host the release agent APK the QR points at (/files/agent.apk), if we fetched one above.
-[ -n "$AGENT_APK" ] && { cp "$AGENT_APK" "$BASE_DIR/files/agent.apk"; ok "agent APK hosted at /files/agent.apk"; }
+[ -n "$AGENT_APK" ] && { base_write files/agent.apk cat "$AGENT_APK"; ok "agent APK hosted at /files/agent.apk"; }
 # ROOT.xml carries the DB password, hash.secret and jwt.secretkey: tc_write makes it mode 600.
 tc_write conf/Catalina/localhost/ROOT.xml cat <<XML
 <?xml version="1.0" encoding="UTF-8"?>
@@ -498,14 +508,13 @@ step "Updater supervisor (release polling + verified agent-APK mirror)"
 # servlet). APPLY_SUPPORTED=0: native installs update server/console by re-running this installer,
 # so the self-apply/rollback routes are disabled — the console shows the manual steps instead.
 SUP_DIR="$BASE_DIR/supervisor"
-mkdir -p "$SUP_DIR"
-cp "$REPO"/supervisor/server.js "$REPO"/supervisor/lib.js "$REPO"/supervisor/recovery.html "$SUP_DIR/"
-cp "$REPO"/release/minisign.pub "$SUP_DIR/minisign.pub"
+for _f in server.js lib.js recovery.html; do base_write "supervisor/$_f" cat "$REPO/supervisor/$_f"; done
+base_write supervisor/minisign.pub cat "$REPO/release/minisign.pub"
 # The running version: the checkout's latest release tag (source installs track the repo). The
 # supervisor compares it against GitHub's latest to decide "update available". Same rule as setup.sh
 # (install/lib/version.sh).
 CURRENT_VERSION=$(mdm_repo_version "$REPO")
-cat > "$BASE_DIR/supervisor.env" <<ENV
+base_write supervisor.env cat <<ENV
 SUPERVISOR_PORT=9000
 SUPERVISOR_BIND=127.0.0.1
 GITHUB_REPO=${GITHUB_REPO}
@@ -521,7 +530,6 @@ PUBLISH_APK_TO=${BASE_DIR}/files/agent.apk
 SERVER_BASE=http://127.0.0.1:${HTTP_PORT}
 APPLY_SUPPORTED=0
 ENV
-chmod 600 "$BASE_DIR/supervisor.env"
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   cat > /etc/systemd/system/mdmesh-supervisor.service <<UNIT
 [Unit]
@@ -558,12 +566,17 @@ fi
 if [ "$SEED" = no ]; then
   step "Backing up the database before upgrading"
   # Liquibase migrations run against live data on the next start; keep a restorable dump first.
-  BK_DIR="$BASE_DIR/backups"; mkdir -p "$BK_DIR"; chmod 700 "$BK_DIR"
+  BK_DIR="$BASE_DIR/backups"; base_guard backups; mkdir -p "$BK_DIR"; chmod 700 "$BK_DIR"
   BK="$BK_DIR/mdmesh-pre-upgrade-$(date +%Y%m%d-%H%M%S).dump"
+  # Dumped into a fresh mktemp file that is renamed over $BK (mv -fT replaces a link planted at that name instead of
+  # writing through it). Temp dumps a killed run left behind are removed first.
+  rm -f "$BK_DIR"/mdmesh-pre-upgrade-*.dump.??????
+  _bk_tmp=$(mktemp "$BK.XXXXXX")
   # shellcheck disable=SC2024  # we ARE root here (checked at the top); sudo only switches to the postgres role
-  if sudo -u postgres pg_dump -Fc mdmesh > "$BK" 2>>"$LOGFILE"; then
+  if sudo -u postgres pg_dump -Fc mdmesh > "$_bk_tmp" 2>>"$LOGFILE" && mv -fT "$_bk_tmp" "$BK"; then
     chmod 600 "$BK"; ok "pg_dump written: $BK  (restore: pg_restore -c -d mdmesh $BK)"
   else
+    rm -f "$_bk_tmp"
     printf '  %s✗ pg_dump failed — not upgrading without a backup. See %s%s\n' "$c_red" "$LOGFILE" "$c_reset"; exit 1
   fi
 fi
