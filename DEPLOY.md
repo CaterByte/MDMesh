@@ -206,7 +206,7 @@ Docker's default `json-file` log driver keeps container logs without a size limi
 `/etc/docker/daemon.json` (for example `"log-opts": {"max-size": "10m", "max-file": "5"}`) and recreate the
 containers. journald caps the journal on its own.
 
-An install upgraded from v0.3.x keeps `/opt/mdmesh/log4j-mdmesh.xml` (and `/opt/mdmesh/logs/`, if a development build
+An install upgraded from v0.2.1–v0.3.x keeps `/opt/mdmesh/log4j-mdmesh.xml` (and `/opt/mdmesh/logs/`, if a development build
 created it). The server no longer reads or writes them; delete them if you like.
 
 For a temporary DEBUG log, put a log4j 1.2 XML config at `/opt/mdmesh/log4j-debug.xml` and start the server with

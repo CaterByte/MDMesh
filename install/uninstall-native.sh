@@ -99,7 +99,7 @@ fi
 rm -rf "$CATALINA"
 if [ "$KEEP_DATA" = 1 ]; then
   for d in emails plugins supervisor; do rm -rf "${BASE_DIR:?}/$d"; done
-  rm -f "$BASE_DIR"/initialized.txt "$BASE_DIR"/log4j-mdmesh.xml "$BASE_DIR"/supervisor.env   # log4j-mdmesh.xml: written by v0.3.x
+  rm -f "$BASE_DIR"/initialized.txt "$BASE_DIR"/log4j-mdmesh.xml "$BASE_DIR"/supervisor.env   # log4j-mdmesh.xml: written by v0.2.1–v0.3.x
   echo "  ✓ removed $CATALINA and app code; kept $BASE_DIR/files and $BASE_DIR/backups"
 else
   rm -rf "$BASE_DIR"

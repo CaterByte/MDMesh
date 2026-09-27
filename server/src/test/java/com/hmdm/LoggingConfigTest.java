@@ -30,6 +30,7 @@ public class LoggingConfigTest {
     private static Hierarchy load() {
         URL url = LoggingConfigTest.class.getResource("/log4j.xml");
         assertNotNull("log4j.xml is not on the classpath", url);
+        assertTrue("testing " + url + ", not the shipped main-resources log4j.xml", url.getPath().endsWith("/classes/log4j.xml"));
         Hierarchy hierarchy = new Hierarchy(new RootLogger(Level.ALL));
         new DOMConfigurator().doConfigure(url, hierarchy);
         return hierarchy;
@@ -57,6 +58,7 @@ public class LoggingConfigTest {
     public void auditEventsGoToStdoutAtInfo() {
         Logger audit = load().getLogger("AuditLogger");
         assertEquals(Level.INFO, audit.getEffectiveLevel());
+        assertEquals("AuditLogger pins its own level, so a raised root does not change it", Level.INFO, audit.getLevel());
         assertTrue("AuditLogger must reach the root's stdout appender", audit.getAdditivity());
     }
 
