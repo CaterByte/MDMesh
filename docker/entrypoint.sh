@@ -39,7 +39,7 @@ jwt_secret_ok() {
 rm -f "$JWT_SECRET_FILE".??????
 if [ -n "$JWT_SECRET" ]; then
   if ! jwt_secret_ok "$JWT_SECRET"; then
-    echo "JWT_SECRET must be hex, a multiple of 4 characters and at least 128 long (the JWT library would silently drop anything else). Generate one with: openssl rand -hex 64 (or unset JWT_SECRET to use the key kept in $JWT_SECRET_FILE)" >&2
+    echo "JWT_SECRET (SERVER_JWT_SECRET in .env) must be hex, a multiple of 4 characters and at least 128 long (the JWT library would silently drop anything else). Generate one with: openssl rand -hex 64 (or unset it to use the key kept in $JWT_SECRET_FILE)" >&2
     exit 1
   fi
 else
