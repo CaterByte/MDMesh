@@ -24,12 +24,6 @@ CONF_DIR=/usr/local/tomcat/conf/Catalina/localhost
 [ -L "$CONF_DIR" ] && rm -f "$CONF_DIR"
 mkdir -p "$CONF_DIR" /opt/mdmesh/files /opt/mdmesh/plugins
 
-# The log4j config ROOT.xml's log4j.config names, rendered on every start like ROOT.xml itself. install/lib/log4j.sh is
-# the native installer's rule too; server.Dockerfile copies it and the template to /usr/local/share/mdmesh.
-# shellcheck source=install/lib/log4j.sh
-. /usr/local/share/mdmesh/log4j.sh
-mdm_render_log4j /usr/local/share/mdmesh/log4j_template.xml /opt/mdmesh
-
 # jwt.secretkey signs the JWTs of REST API clients (/rest/public/jwt/login; the console uses its session cookie). Left
 # empty, the server picks a random key at every start and signs those clients out on each restart. So: an explicit
 # JWT_SECRET wins; otherwise the key is generated once into the persistent /opt/mdmesh volume and reused on every
@@ -105,7 +99,6 @@ cat > "$_root_xml_tmp" <<EOF
     <Parameter name="swagger.base.path" value="/rest"/>
 
     <Parameter name="initialization.completion.signal.file" value="/opt/mdmesh/initialized.txt"/>
-    <Parameter name="log4j.config" value="file:///opt/mdmesh/log4j-mdmesh.xml"/>
     <Parameter name="aapt.command" value="aapt"/>
 
     <!-- MQTT broker disabled: the agent wakes over the WebSocket, not MQTT. -->

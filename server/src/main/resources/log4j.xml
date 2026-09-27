@@ -20,6 +20,13 @@
   ~
   -->
 
+<!--
+  The server's only log4j config: everything goes to stdout, at INFO. Docker keeps it in the container log
+  (docker compose logs server), native installs in the journal (journalctl -u mdmesh-server). There is no log file and
+  no external config: log4j reads this file when the first logger is created, before any web.xml listener runs. Audit
+  events are the lines of the "AuditLogger" logger. DEPLOY.md ("Server logs") has the temporary-DEBUG override.
+  LoggingConfigTest pins these levels.
+-->
 <!DOCTYPE log4j:configuration SYSTEM "log4j.dtd">
 <log4j:configuration xmlns:log4j="http://jakarta.apache.org/log4j/" debug="false">
 
@@ -29,9 +36,9 @@
         </layout>
     </appender>
 
-    <logger name="AuditLogger" additivity="false">
-        <level value="DEBUG"/>
-        <appender-ref ref="stdout"/>
+    <!-- Audit events (plugins/audit AuditFilter), through the root's stdout appender. INFO even if the root is raised. -->
+    <logger name="AuditLogger">
+        <level value="INFO"/>
     </logger>
 
     <!-- Suppress 'Stealing link for clientId ...' warnings -->
@@ -40,7 +47,7 @@
     </logger>
 
     <root>
-        <level value="DEBUG"/>
+        <level value="INFO"/>
         <appender-ref ref="stdout"/>
     </root>
 

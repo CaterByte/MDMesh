@@ -43,8 +43,6 @@
 
     <Parameter name="initialization.completion.signal.file" value="_INSTALL_FLAG_"/>
 
-    <Parameter name="log4j.config" value="file://_BASE_DIRECTORY_/log4j-hmdm.xml"/>
-
     <Parameter name="aapt.command" value="aapt"/>
 
     <!-- MQTT notification service parameters -->

@@ -16,8 +16,6 @@ REPO="$PWD"   # repo root — used for absolute paths inside subshells (e.g. exp
 . "$REPO/install/lib/db.sh"
 # shellcheck source=lib/version.sh
 . "$REPO/install/lib/version.sh"
-# shellcheck source=lib/log4j.sh
-. "$REPO/install/lib/log4j.sh"
 
 [ "$(id -u)" = "0" ] || { echo "Run as root (sudo)."; exit 1; }
 command -v apt-get >/dev/null || { echo "This script targets Debian/Ubuntu."; exit 1; }
@@ -107,7 +105,7 @@ cat <<WARN
     • apt-get install openjdk-17-jdk, postgresql, maven, nodejs, npm, curl, python3, aapt
     • create or alter a PostgreSQL role and database "mdmesh" (resets that role's password)
     • download and unpack Apache Tomcat 9 into /opt/mdmesh-tc (clears its webapps/)
-    • write config, logs and uploaded files under /opt/mdmesh
+    • write config and uploaded files under /opt/mdmesh (the server logs to the systemd journal)
     • start Tomcat, run database migrations, and seed the admin account
 
   Intended for a dedicated server you control. This script does not undo these changes.
@@ -442,7 +440,6 @@ cp -a "$REPO"/web/dist/. "$CATALINA/webapps/ROOT/"   # index.html + assets at / 
 tc_write webapps/ROOT/WEB-INF/rewrite.config \
   printf 'RewriteCond %%{REQUEST_URI} !-f\nRewriteRule ^/(?!rest|files|agent|update|healthz(?:/|$))(.*)$ /index.html\n'
 mkdir -p "$BASE_DIR/files" "$BASE_DIR/plugins"   # tc_write creates conf/Catalina/localhost after checking for links
-mdm_render_log4j install/log4j_template.xml "$BASE_DIR"   # the Docker entrypoint writes it with the same rule
 cp -r install/emails "$BASE_DIR/" 2>/dev/null || true
 # Host the release agent APK the QR points at (/files/agent.apk), if we fetched one above.
 [ -n "$AGENT_APK" ] && { cp "$AGENT_APK" "$BASE_DIR/files/agent.apk"; ok "agent APK hosted at /files/agent.apk"; }
@@ -469,7 +466,6 @@ tc_write conf/Catalina/localhost/ROOT.xml cat <<XML
     <Parameter name="role.orgadmin.id" value="2"/>
     <Parameter name="swagger.base.path" value="/rest"/>
     <Parameter name="initialization.completion.signal.file" value="${BASE_DIR}/initialized.txt"/>
-    <Parameter name="log4j.config" value="file://${BASE_DIR}/log4j-mdmesh.xml"/>
     <Parameter name="aapt.command" value="aapt"/>
     <Parameter name="mqtt.server.uri" value=""/>
     <Parameter name="mqtt.auth" value="0"/>

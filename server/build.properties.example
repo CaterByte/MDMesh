@@ -41,9 +41,6 @@ initialization.completion.signal.file=/home/launcher/initialized.txt
 # A command for calling the aapt
 aapt.command=aapt
 
-# An URL for the file with configuration for loggers
-log4j.config=file:///log4j-hmdm.xml
-
 # The parameters specific to Device Log plugin
 plugin.devicelog.persistence.config.class=com.hmdm.plugins.devicelog.persistence.postgres.DeviceLogPostgresPersistenceConfiguration
 

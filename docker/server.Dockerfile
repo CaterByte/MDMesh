@@ -18,13 +18,10 @@ RUN mvn -q -B -DskipTests package
 FROM tomcat:9.0-jdk17-temurin
 RUN rm -rf /usr/local/tomcat/webapps/*
 COPY --from=build /src/server/target/launcher.war /usr/local/tomcat/webapps/ROOT.war
-# App base directory (data, plugins, logging config, email templates). /opt/mdmesh should be a volume
+# App base directory (data, plugins, email templates). /opt/mdmesh should be a volume
 # so uploaded files + the hosted agent APK survive container recreation.
 RUN mkdir -p /opt/mdmesh/files /opt/mdmesh/plugins \
  && groupadd -r mdmesh && useradd -r -g mdmesh -d /opt/mdmesh -s /usr/sbin/nologin mdmesh
-# The log4j template + its render rule (install/lib/log4j.sh, shared with the native installer); entrypoint.sh writes
-# /opt/mdmesh/log4j-mdmesh.xml from them on every start, so a volume holding an older copy is repaired too.
-COPY install/log4j_template.xml install/lib/log4j.sh /usr/local/share/mdmesh/
 COPY install/emails /opt/mdmesh/emails
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
