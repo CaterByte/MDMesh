@@ -151,9 +151,11 @@ if [ "$rc" -ne 0 ] && [ "$n" -eq 0 ]; then fail "health routes: probe container 
 
 # --- 4. The dev stack, configured by docker/dev.env ALONE (not the fixed env file above), so a variable
 # docker-compose.yml requires but dev.env lacks fails here. dev.env pins the project name: without it the project
-# would be named after the checkout directory ("MDMesh" -> mdmesh, the production project). And the overlay must
-# refuse to load without dev.env, or a setup.sh .env in the same checkout (COMPOSE_PROJECT_NAME=mdmesh) would point
-# the dev stack at the production containers and database volume. ---
+# would be named after the checkout directory ("MDMesh" -> mdmesh, the production project). And `config`/`up` of the
+# overlay must refuse to run without dev.env, or a setup.sh .env in the same checkout (COMPOSE_PROJECT_NAME=mdmesh)
+# would point the dev stack at the production containers and database volume. The guard only covers commands that
+# interpolate the files (`config`, `up`); `down -v`, `stop`, `rm`, `exec`, `logs` and `ps` still run against the
+# project that .env names, so docs/DEV.md passes --env-file docker/dev.env on every command. ---
 echo "Dev stack (docker compose --env-file docker/dev.env):"
 # Shell variables beat --env-file, so unset every variable the compose files require (${VAR:?...}, which includes the
 # MDMESH_DEV guard): only dev.env may supply them here, whatever the developer's shell exports.
@@ -169,9 +171,9 @@ else
 fi
 # Refused by the guard itself: an unrelated config error must not count as the refusal.
 if out="$(docker compose --env-file "$ENVF" -f docker-compose.yml -f docker-compose.dev.yml config -q 2>&1)"; then
-  fail "the dev overlay loaded without docker/dev.env"
+  fail "the dev overlay's config ran without docker/dev.env"
 elif grep -qF 'run the dev stack with --env-file docker/dev.env' <<<"$out"; then
-  pass "the dev overlay refuses to load without docker/dev.env"
+  pass "the dev overlay refuses config without docker/dev.env"
 else
   fail "the dev overlay failed without docker/dev.env, but not on its MDMESH_DEV guard"
   printf '%s\n' "$out" | tail -5 | sed 's/^/         /'

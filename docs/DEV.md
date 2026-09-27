@@ -57,10 +57,15 @@ change keeps the old external config across WAR reloads: recreate the server onc
 docker/dev.env up -d --force-recreate server`).
 
 `down -v` deletes the server's data volume too (`/opt/mdmesh`: uploaded files and the JWT signing key in
-`jwt.secret`), so the next start generates a new key. With `--env-file docker/dev.env`, `down -v` only ever deletes the
-`mdmesh-dev` project's volumes. Do not run the dev stack in a checkout that also runs a real install (`./setup.sh`
-writes a `.env` there): in that directory any compose command without `--env-file docker/dev.env`, even a `down -v`
-naming the dev file, acts on the production project, because compose falls back to the project name in `.env`.
+`jwt.secret`), so the next start generates a new key. With `--env-file docker/dev.env`, `down -v` deletes the
+`mdmesh-dev` project's volumes, unless your shell exports `COMPOSE_PROJECT_NAME`: shell variables beat the env file.
+Before a `down -v`, check which project it will hit: `docker compose --env-file docker/dev.env config | head -1` must
+print `name: mdmesh-dev`.
+
+Do not run the dev stack in a checkout that also runs a real install (`./setup.sh` writes a `.env` there). The
+`MDMESH_DEV` guard in `docker-compose.dev.yml` stops `up` and `config` without `--env-file docker/dev.env`, but not
+`down -v`, `stop`, `rm`, `exec`, `logs` or `ps`. Run without it there, those act on the production project, even when
+they name the dev file, because compose falls back to the project name in `.env`.
 
 **Fast Java loop.** Rebuilding the server image runs the whole Maven build inside Docker (over a minute). For quicker
 turns, build on the host (JDK 17) and copy the WAR into the running container; Tomcat reloads it within about 20 s:

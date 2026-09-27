@@ -7,8 +7,10 @@
 # Console http://localhost:8088 · API http://localhost:8080 · Postgres localhost:5432 · JDWP localhost:5005
 # A port is taken? Export DEV_WEB_PORT / DEV_API_PORT / DEV_PG_PORT / DEV_DEBUG_PORT first. The full loop: docs/DEV.md.
 
-# Refuse to load without docker/dev.env. That file pins the project name; without it, the .env that setup.sh writes
-# (COMPOSE_PROJECT_NAME=mdmesh) would point this overlay at a production stack's containers and database volume.
+# Guard: without docker/dev.env, `up` and `config` stop here. That file pins the project name; without it, the .env
+# that setup.sh writes (COMPOSE_PROJECT_NAME=mdmesh) would point this overlay at a production stack's containers and
+# database volume. The guard does NOT stop `down -v`, `stop`, `rm`, `exec`, `logs` or `ps` (compose does not
+# interpolate this for them), so those act on whatever project .env names: always pass --env-file docker/dev.env.
 x-dev-env: ${MDMESH_DEV:?run the dev stack with --env-file docker/dev.env (see docs/DEV.md)}
 
 services:
