@@ -238,11 +238,11 @@ kill_svc_user() {
 # (right after the port preflight), so the usual refusal leaves the running install untouched; then again after
 # kill_svc_user (argument "stopped"), because a process of the account could have added a job in between, and after the
 # kill none is left to add another before the writes. That second refusal comes after Tomcat and the supervisor were
-# stopped, so it says so and how to start them. Comment-only crontab lines run nothing and are ignored. The jobs are
+# stopped, so it says so and that only a re-run restores them. Comment-only crontab lines run nothing and are ignored. The jobs are
 # not printed: the account wrote them, and they are not for root's terminal.
 refuse_svc_user_jobs() {
   id -u "$SVC_USER" >/dev/null 2>&1 || return 0
-  local cron=0 at=0 u units=
+  local cron=0 at=0
   if command -v crontab >/dev/null 2>&1; then
     cron=$(crontab -l -u "$SVC_USER" 2>/dev/null | grep -cvE '^[[:space:]]*(#|$)' || true)
   fi
@@ -257,13 +257,10 @@ refuse_svc_user_jobs() {
   printf '  Find out how they got there (it can mean the server was compromised), remove them, then re-run.\n'
   if [ "${1:-}" = stopped ]; then
     printf '  %sThe server and the updater supervisor are stopped now%s: this run stopped them before it found the jobs.\n' "$c_yel" "$c_reset"
-    printf '    Re-running this installer (after removing the jobs) finishes the upgrade and starts them.\n'
-    for u in "$SVC_UNIT" "$SUP_UNIT"; do unit_installed "$u" && units="$units $u"; done
-    if [ -n "$units" ]; then
-      printf '    To start them again as they were:  systemctl start%s\n' "$units"
-      printf '    (this run already set a new password on the database role, which the old server config does not\n'
-      printf '    have, so the server cannot connect to the database until the installer completes).\n'
-    fi
+    printf '    Remove the jobs and re-run this installer: that finishes the upgrade and starts both. Do not start the old\n'
+    printf '    units by hand: the database role already has a new password the old server config lacks'
+    [ "${REPLACE_DATA:-}" = yes ] && printf ' (and the database\n    was already recreated empty)'
+    printf ',\n    and an updater unit from before v0.4 runs as root code that %s can change.\n' "$SVC_USER"
   fi
   exit 1
 }
