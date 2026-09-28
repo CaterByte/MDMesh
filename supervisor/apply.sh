@@ -61,7 +61,7 @@ healthy() {
 #  2. ONE psql session, ONE transaction (--single-transaction wraps the -c's and the -f in a single BEGIN/COMMIT, in
 #     order): first a bounded lock_timeout, then every other session on the database is ended (a stray client or a
 #     stuck backend holding a lock), then the dump. Same session, so no gap for a new lock to slip in between;
-#  3. the bound holds for the whole dump: its preamble says `SET lock_timeout = 0;`, which would cancel an earlier SET,
+#  3. the bound (60s) holds for the whole dump: its preamble says `SET lock_timeout = 0;`, which would cancel an earlier SET,
 #     so that one line (the preamble's, never data) is rewritten on the way in. A lock that cannot be ended (e.g. a prepared transaction) is then a loud
 #     "lock timeout" failure instead of a restore that hangs forever;
 #  4. -o /dev/null: result rows (the dump's setval()s) are dropped, so restore.log holds only notices (the number of
@@ -73,8 +73,7 @@ healthy() {
 # failed restore the server is left stopped on purpose. The operator retries Roll back (same backup) once the cause is
 # fixed; DEPLOY.md has the by-hand restore.
 restore_db() {
-  local sql="$1" log="$2" running lt="${RESTORE_LOCK_TIMEOUT:-60s}"
-  printf '%s' "$lt" | grep -Eq '^[0-9]+(ms|s|min)?$' || lt=60s   # a plain duration only: it goes into SQL
+  local sql="$1" log="$2" running lt=60s   # the lock bound: a constant, never taken from the environment (it goes into SQL)
   running="$(grep -E '^CURRENT_VERSION=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-)"
   if ! dc stop server; then
     errln "could not stop the server, so the database was NOT restored and nothing was changed: .env still names ${running:-the running version}, which may still be running (a failed recreate can leave it stopped). Fix the cause (see the log above), then Roll back again from /recovery."

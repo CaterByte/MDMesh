@@ -1126,16 +1126,17 @@ t.test('a successful manual apply of the skipped version clears the skip (auto.j
     a.deepEqual(JSON.parse(fs.readFileSync(path.join(d.dir, 'auto.json'), 'utf8')), { auto: false, skipVersion: null });
   });
 
-t.test('restore_db: RESTORE_LOCK_TIMEOUT takes a plain duration only (it goes into SQL); anything else falls back to 60s', () => {
+t.test('restore_db: the lock bound is a fixed 60s; no environment value reaches the SQL (not even with a newline)', () => {
   const fs = require('fs');
-  for (const [val, want] of [['5s', "'5s'"], ['1500ms', "'1500ms'"], ['2min', "'2min'"], ["1s'; DROP TABLE x; --", "'60s'"], ['', "'60s'"]]) {
+  // The knob was never wired through compose, and a line-based check let "5s\n<anything>" through: it is gone.
+  for (const val of ['5s', "5s\n'; DROP TABLE x; --", '0']) {
     const d = rollbackDeploy();
     try {
       const r = runScript('rollback.sh', [], { ...d.env, RESTORE_LOCK_TIMEOUT: val });
       a.equal(r.code, 0, r.all);
       const call = d.calls().find((c) => /psql .*--single-transaction/.test(c));
-      a.ok(call.includes(`-c SET lock_timeout = ${want} -c`), `${JSON.stringify(val)} → ${want}: ${call}`);
-      a.ok(fs.readFileSync(d.log + '.stdin', 'utf8').includes(`SET lock_timeout = ${want};`));
+      a.ok(call.includes("-c SET lock_timeout = '60s' -c"), JSON.stringify(val) + ': ' + call);
+      a.ok(fs.readFileSync(d.log + '.stdin', 'utf8').includes("SET lock_timeout = '60s';"));
       a.ok(!call.includes('DROP TABLE'));
     } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
   }
