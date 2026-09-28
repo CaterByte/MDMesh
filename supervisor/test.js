@@ -84,6 +84,19 @@ t.test('fetchAsset — refuses a non-https URL: the first one and every redirect
   a.deepEqual(hop.calls.map((c) => c.url), ['https://api.github.com/repos/o/r/releases/assets/1'], 'the http hop is never requested');
 });
 
+t.test('fetchAsset — cancels each redirect response body before following it (no dangling sockets)', async () => {
+  let cancelled = 0;
+  const redirect = { status: 302, headers: new Headers({ location: 'https://cdn.test/x' }), body: { cancel: async () => { cancelled++; } } };
+  const final = new Response('X', { status: 200 });
+  const f = async (url) => (url === 'https://api.github.com/repos/o/r/releases/assets/1' ? redirect : final);
+  const r = await fetchAsset({ url: 'https://api.github.com/repos/o/r/releases/assets/1' }, 'tok', f);
+  a.equal(await r.text(), 'X');
+  a.equal(cancelled, 1);
+  // A redirect without a body (body: null) is fine too.
+  const f2 = async (url) => (url === 'https://api.github.com/a' ? { status: 302, headers: new Headers({ location: '/b' }), body: null } : final);
+  a.equal((await fetchAsset({ url: 'https://api.github.com/a' }, 'tok', f2)).status, 200);
+});
+
 /** A scripted fetch: `routes` maps URL → { status, location?, body? }; every call is recorded with its headers. */
 function mockFetch(routes) {
   const calls = [];

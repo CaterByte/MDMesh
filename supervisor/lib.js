@@ -102,6 +102,7 @@ async function fetchAsset(asset, token, fetchImpl = globalThis.fetch, maxRedirec
     const r = await fetchImpl(cur.href, { headers, redirect: 'manual' });
     const loc = r.status >= 300 && r.status < 400 && r.headers.get('location');
     if (!loc) return r;
+    try { await (r.body && r.body.cancel()); } catch { /* already consumed or closed */ } // free the connection
     const next = httpsOnly(new URL(loc, cur).href);
     if (next.origin !== cur.origin && headers.Authorization) {
       const { Authorization, ...rest } = headers; // eslint-disable-line no-unused-vars
