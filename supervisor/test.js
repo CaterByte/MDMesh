@@ -1075,3 +1075,27 @@ t.test('auto.json is written atomically (tmp + rename): a link at its path is re
     a.equal(fs.readFileSync(outside, 'utf8'), 'NOT AUTO STATE', 'the link target is untouched');
     a.ok(!fs.existsSync(path.join(dir, 'auto.json.tmp')), 'no temp file left behind');
   });
+
+t.test('a successful manual apply of the skipped version clears the skip (auto.json and autoSkipped)',
+  { skip: !HAS_MINISIGN && 'minisign not installed', timeout: 40000 }, async (tt) => {
+    const fs = require('fs'), path = require('path');
+    const d = makeDeploy('SERVER_VERSION=0.0.1\nWEB_VERSION=0.0.1\nCURRENT_VERSION=0.0.1\n');
+    fs.writeFileSync(path.join(d.dir, 'auto.json'), JSON.stringify({ auto: false, skipVersion: '0.0.2' }));
+    let gh = null, sup = null, authz = null;
+    tt.after(async () => {
+      await stopChild(sup && sup.child); if (gh) await gh.close(); if (authz) await authz.close();
+      fs.rmSync(d.dir, { recursive: true, force: true });
+    });
+    gh = await fakeGitHub(d.dir, { version: '0.0.2' });
+    authz = await fakeAuthz();
+    sup = await spawnSupervisor(d.dir, { ...d.env, ...gh.env, APPLY_SUPPORTED: '1', SERVER_BASE: authz.base }, /supervisor on/, ['--require', gh.preload]);
+    const status = async () => (await fetch(`http://127.0.0.1:${sup.port}/update/status`)).json();
+    const before = await waitFor(async () => { const x = await status(); return x.checkedAt && x; }, 'the startup poll');
+    a.equal(before.autoSkipped, '0.0.2');
+    const r = await fetch(`http://127.0.0.1:${sup.port}/update/apply`, { method: 'POST', headers: ADMIN });
+    a.equal(r.status, 202, 'a manual Update still applies the skipped version');
+    const s = await waitFor(async () => { const x = await status(); return x.checkedAt > before.checkedAt && x; }, 'the post-apply poll', 20000);
+    a.equal(s.apply.phase, 'done', sup.log());
+    a.equal(s.autoSkipped, null, 'the skip is cleared once that version is running');
+    a.deepEqual(JSON.parse(fs.readFileSync(path.join(d.dir, 'auto.json'), 'utf8')), { auto: false, skipVersion: null });
+  });

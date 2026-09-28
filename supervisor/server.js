@@ -79,6 +79,12 @@ function saveAuto() {
     try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ }
   }
 }
+/** Forget the skip (the skipped version was applied successfully by hand). */
+function clearAutoSkip() {
+  skipVersion = null;
+  saveAuto();
+  state.autoSkipped = null;
+}
 /** Never auto-apply `v` again (see skipVersion). Persisted at once, and shown as autoSkipped in /update/status. */
 function blockAuto(v) {
   if (!v || v === skipVersion) return;
@@ -314,6 +320,7 @@ function startApply(trigger) {
     const phase = code === 0 ? 'done' : (final && final !== 'done' ? final : 'failed');
     apply = { ...apply, phase, finishedAt: Date.now() };
     if (code !== 0) blockAuto(toVersion); // never auto-retry a version that failed, however it was started
+    else if (toVersion === skipVersion) clearAutoSkip(); // it runs now (applied by hand): nothing left to skip
     refreshStatus(); // current + updateAvailable now, then ask GitHub
     poll();
   });
