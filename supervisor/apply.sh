@@ -14,6 +14,9 @@
 # supervisor/test.js drives it with a stub docker (order, exit codes, messages). The restore was checked by hand
 # against postgres:14 with a good and a deliberately broken dump; validate the full path on a staging deploy.
 set -uo pipefail   # deliberately NOT -e: failures are handled explicitly so we can roll back.
+# Everything these scripts create is private: the DB dump holds password hashes, and the .env snapshot, the pointer
+# and restore.log sit beside it. (The host .env is only rewritten in place: sed -i and >> keep its mode and owner.)
+umask 077
 
 VERSION="${1:?usage: apply.sh <version>}"
 PROJECT_DIR="${COMPOSE_PROJECT_DIR:-/project}"

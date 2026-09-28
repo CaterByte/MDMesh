@@ -4,6 +4,9 @@
 # The break-glass recovery action. Emits PHASE/ERR/OK lines for server.js, mirroring apply.sh, and exits non-zero on
 # any failure. Never touches `supervisor` or `postgres` containers. Data written since the update is discarded.
 set -uo pipefail
+# Everything these scripts create is private: the DB dump holds password hashes, and the .env snapshot, the pointer
+# and restore.log sit beside it. (The host .env is only rewritten in place: sed -i and >> keep its mode and owner.)
+umask 077
 
 PROJECT_DIR="${COMPOSE_PROJECT_DIR:-/project}"
 ENV_FILE="$PROJECT_DIR/.env"

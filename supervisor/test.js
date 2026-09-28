@@ -1134,3 +1134,21 @@ t.test('restore_db: RESTORE_LOCK_TIMEOUT takes a plain duration only (it goes in
     } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
   }
 });
+
+t.test('backups are private (umask 077): the dump (password hashes), the .env snapshot, the pointer and restore.log are 0600; '
+  + 'the host .env keeps its mode', () => {
+  const fs = require('fs'), path = require('path');
+  const d = makeDeploy('SERVER_VERSION=0.0.1\nWEB_VERSION=0.0.1\nCURRENT_VERSION=0.0.1\n');
+  try {
+    fs.chmodSync(path.join(d.project, '.env'), 0o644);
+    // umask 022 in the caller (like the supervisor process): the scripts must tighten it themselves.
+    const r = cp.spawnSync('bash', ['-c', 'umask 022; exec bash "$0" 0.0.2', path.join(__dirname, 'apply.sh')],
+      { env: { ...d.env, STUB_CURL_FAIL: '1', HEALTH_TIMEOUT: '0' }, encoding: 'utf8' });
+    a.equal(r.status, 1, r.stdout + r.stderr); // health fails → rollback with a restore → restore.log written too
+    const stamp = fs.readFileSync(path.join(d.backups, 'latest'), 'utf8').trim();
+    for (const f of [stamp + '.sql', stamp + '.env', 'latest', stamp + '.restore.log']) {
+      a.equal(fs.statSync(path.join(d.backups, f)).mode & 0o777, 0o600, f);
+    }
+    a.equal(fs.statSync(path.join(d.project, '.env')).mode & 0o777, 0o644, 'the host .env (sed -i / >>) keeps its mode');
+  } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
+});
