@@ -618,3 +618,57 @@ t.test('rollback.sh restores CURRENT_VERSION from the snapshot (not SERVER_VERSI
     a.match(d.envFile(), /^CURRENT_VERSION=0\.0\.1$/m);
   } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
 });
+
+t.test('with AUTO_UPDATE on, a rollback is not undone by auto-applying the release just rolled away from',
+  { skip: !HAS_MINISIGN && 'minisign not installed', timeout: 30000 }, async (tt) => {
+    const fs = require('fs'), path = require('path'), http = require('http');
+    const d = makeDeploy('SERVER_VERSION=0.0.2\nWEB_VERSION=0.0.2\nCURRENT_VERSION=0.0.2\n');
+    fs.writeFileSync(path.join(d.backups, 'latest'), '20260927-120000\n');
+    fs.writeFileSync(path.join(d.backups, '20260927-120000.env'), 'SERVER_VERSION=0.0.1\nWEB_VERSION=0.0.1\nCURRENT_VERSION=0.0.1\n');
+    fs.writeFileSync(path.join(d.backups, '20260927-120000.sql'), 'SELECT 1;\n');
+    fs.writeFileSync(path.join(d.dir, 'recovery.token'), 'tok123');
+    // The signed 0.0.2 release is the latest one on the channel.
+    fs.writeFileSync(path.join(d.dir, 'manifest.json'), JSON.stringify({ version: '0.0.2', channel: 'stable', components: {} }));
+    cp.execFileSync('minisign', ['-G', '-W', '-p', path.join(d.dir, 'k.pub'), '-s', path.join(d.dir, 'k.key')], { stdio: 'ignore' });
+    cp.execFileSync('minisign', ['-S', '-s', path.join(d.dir, 'k.key'), '-m', path.join(d.dir, 'manifest.json')], { stdio: 'ignore' });
+    let polls = 0;
+    const gh = http.createServer((req, res) => {
+      const base = `http://127.0.0.1:${gh.address().port}`;
+      if (req.url.startsWith('/repos/o/r/releases')) {
+        polls++;
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify([{ tag_name: 'v0.0.2', assets: ['manifest.json', 'manifest.json.minisig']
+          .map((name) => ({ name, browser_download_url: `${base}/dl/${name}` })) }]));
+      } else if (req.url.startsWith('/dl/')) res.end(fs.readFileSync(path.join(d.dir, req.url.slice(4))));
+      else { res.statusCode = 404; res.end(); }
+    });
+    await new Promise((r) => gh.listen(0, '127.0.0.1', r));
+    const preload = path.join(d.dir, 'fake-github.js');
+    fs.writeFileSync(preload, "const f = globalThis.fetch;\n"
+      + "globalThis.fetch = (u, o) => f(String(u).replace('https://api.github.com', process.env.FAKE_GITHUB), o);\n");
+    let sup = null;
+    tt.after(async () => {
+      await stopChild(sup && sup.child);
+      gh.closeAllConnections(); await new Promise((r) => gh.close(r));
+      fs.rmSync(d.dir, { recursive: true, force: true });
+    });
+    sup = await spawnSupervisor(d.dir, { ...d.env, FAKE_GITHUB: `http://127.0.0.1:${gh.address().port}`, GITHUB_REPO: 'o/r',
+      MANIFEST_PUBKEY: path.join(d.dir, 'k.pub'), APPLY_SUPPORTED: '1', AUTO_UPDATE: '1', CURRENT_VERSION: '0.0.1',
+      SERVER_BASE: 'http://127.0.0.1:9' }, /supervisor on/, ['--require', preload]);
+    const status = async () => (await fetch(`http://127.0.0.1:${sup.port}/update/status`)).json();
+    await waitFor(async () => (await status()).verified, 'the startup poll');
+    a.equal((await status()).updateAvailable, false, 'running 0.0.2 already');
+
+    const r = await fetch(`http://127.0.0.1:${sup.port}/update/rollback`, { method: 'POST',
+      headers: { 'X-MDMesh-Console': '1', 'X-Recovery-Token': 'tok123' } });
+    a.equal(r.status, 202);
+    // The rollback's own poll sees 0.0.2 as an update again; it must stay offered, not be auto-applied.
+    await waitFor(async () => polls >= 2, 'the post-rollback poll', 20000);
+    await new Promise((res) => setTimeout(res, 500)); // the poll's verify + setStatus (an auto-apply would start there)
+    const after = await status();
+    a.equal(after.apply.trigger, 'rollback', 'no apply started after the rollback:\n' + sup.log());
+    a.equal(after.apply.phase, 'rolled_back');
+    a.equal(after.current, '0.0.1');
+    a.equal(after.updateAvailable, true, '0.0.2 is still offered for a manual Update');
+    a.ok(!d.calls().some((c) => c.includes('pg_dump')), 'apply.sh never ran');
+  });

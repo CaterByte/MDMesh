@@ -56,7 +56,9 @@ let apply = null;
 const AUTO_FILE = process.env.AUTO_FILE || '/backups/auto.json';
 let autoUpdate = process.env.AUTO_UPDATE === '1' || process.env.AUTO_UPDATE === 'true';
 try { const j = JSON.parse(fs.readFileSync(AUTO_FILE, 'utf8')); if (typeof j.auto === 'boolean') autoUpdate = j.auto; } catch { /* no saved pref yet */ }
-// Version whose auto-apply already failed — never auto-retry it (prevents a rollback crash-loop).
+// Version unattended mode must not apply again: one whose auto-apply already failed (prevents a rollback crash-loop),
+// or one an operator rolled back from (auto-applying it would undo the rollback on the very next poll). A manual
+// Update still offers and applies it.
 let lastAutoFailed = null;
 // Wall-clock of the last completed poll() — used to rate-limit the on-demand /update/check route.
 let lastPollAt = 0;
@@ -289,6 +291,7 @@ function startRollback() {
     // rollback.sh wrote the restored CURRENT_VERSION to .env (even on a failed restore, .env names the images compose
     // will run), so `current` follows it and the update to the version just rolled away from is offered again.
     currentVersion = readCurrentVersion(currentVersion);
+    if (apply.fromVersion && apply.fromVersion !== currentVersion) lastAutoFailed = apply.fromVersion;
     if (!isTerminal(apply.phase)) apply = { ...apply, phase: code === 0 ? 'rolled_back' : 'failed' };
     apply = { ...apply, toVersion: currentVersion, finishedAt: Date.now() };
     state.apply = apply;
