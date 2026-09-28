@@ -38,6 +38,24 @@ function shapeStatus({ current, manifest, verified, checkedAt, error }) {
   };
 }
 
+/** Why an Update must not start, or null if it may. `manifest` is the last VERIFIED manifest (null if none), `current`
+ *  the running version, `skipVersion` the auto-apply skip (it never blocks a manual Update; it only marks a running
+ *  version whose update failed). The version guard matters beyond the banner: re-applying the running (or an older)
+ *  version would overwrite /backups/latest with a dump of the post-update database, leaving nothing to roll back to. */
+function applyRefusal({ manifest, current, skipVersion }) {
+  if (!manifest) return 'no verified update available';
+  const to = manifest.version;
+  if (!to) return 'the verified manifest has no version';
+  if (!parseSemver(current)) return `the running version "${current}" is not a release version (X.Y.Z), so it cannot be compared: update by hand`;
+  if (semverGt(to, current)) return null;
+  if (to === current || !semverGt(current, to)) {
+    return current === skipVersion
+      ? `already running ${current}, whose update failed: use Roll back (/recovery) to return to the previous version`
+      : `already running ${current}`;
+  }
+  return `already running ${current} (newer than ${to})`;
+}
+
 /** Pull the image refs + target version a verified manifest applies. */
 function imageTags(manifest) {
   const c = (manifest && manifest.components) || {};
@@ -181,5 +199,5 @@ function recoveryPage(html, applySupported) {
 module.exports = {
   parseSemver, semverGt, pickRelease, shapeStatus,
   imageTags, nextPhase, isTerminal, APPLY_PHASES, APPLY_TERMINAL,
-  apkAsset, sha256Matches, recoveryPage, isPublishTemp, assetRequest, fetchAsset, envValue, applyLine,
+  apkAsset, sha256Matches, recoveryPage, isPublishTemp, assetRequest, fetchAsset, envValue, applyLine, applyRefusal,
 };

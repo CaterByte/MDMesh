@@ -1,7 +1,7 @@
 const t = require('node:test');
 const a = require('node:assert');
 const { semverGt, pickRelease, shapeStatus, imageTags, nextPhase, isTerminal, apkAsset, sha256Matches, recoveryPage, isPublishTemp,
-  assetRequest, fetchAsset, envValue, applyLine } = require('./lib');
+  assetRequest, fetchAsset, envValue, applyLine, applyRefusal } = require('./lib');
 
 t.test('semverGt', () => {
   a.equal(semverGt('1.2.4', '1.2.3'), true);
@@ -164,6 +164,21 @@ t.test('envValue — reads KEY=value from .env text the way apply.sh get_env doe
   a.equal(envValue('CURRENT_VERSION=\n', 'CURRENT_VERSION'), null);  // empty = unset
   a.equal(envValue('', 'CURRENT_VERSION'), null);
   a.equal(envValue(null, 'CURRENT_VERSION'), null);
+});
+
+t.test('applyRefusal — the Update guard says what is actually true', () => {
+  const m = (v) => ({ version: v });
+  a.equal(applyRefusal({ manifest: m('0.0.3'), current: '0.0.2', skipVersion: null }), null, 'a newer verified release applies');
+  a.equal(applyRefusal({ manifest: m('0.0.3'), current: '0.0.2', skipVersion: '0.0.3' }), null, 'the auto skip never blocks a manual Update');
+  a.equal(applyRefusal({ manifest: null, current: '0.0.2' }), 'no verified update available');
+  a.equal(applyRefusal({ manifest: {}, current: '0.0.2' }), 'the verified manifest has no version');
+  // The semverGt guard: never re-apply the running (or an older) version: it would overwrite /backups/latest.
+  a.equal(applyRefusal({ manifest: m('0.0.4'), current: '0.0.4', skipVersion: null }), 'already running 0.0.4');
+  a.equal(applyRefusal({ manifest: m('0.0.3'), current: '0.0.4', skipVersion: null }), 'already running 0.0.4 (newer than 0.0.3)');
+  a.equal(applyRefusal({ manifest: m('0.0.4'), current: '0.0.4', skipVersion: '0.0.4' }),
+    'already running 0.0.4, whose update failed: use Roll back (/recovery) to return to the previous version');
+  a.equal(applyRefusal({ manifest: m('0.0.4'), current: 'latest', skipVersion: null }),
+    'the running version "latest" is not a release version (X.Y.Z), so it cannot be compared: update by hand');
 });
 
 t.test('sha256Matches — the APK publish gate', () => {
@@ -982,6 +997,7 @@ t.test('after an apply, status shows the new current even when the next poll fai
     const backups = fs.readdirSync(d.backups).sort();
     const again = await fetch(`http://127.0.0.1:${sup.port}/update/apply`, { method: 'POST', headers: ADMIN });
     a.equal(again.status, 400, 'a second Update of the running version is refused');
+    a.deepEqual(await again.json(), { error: 'already running 0.0.2' }, 'and says why');
     a.deepEqual(fs.readdirSync(d.backups).sort(), backups, 'no second backup overwrote /backups/latest');
   });
 

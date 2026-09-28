@@ -7,8 +7,8 @@ const os = require('os');
 const cp = require('child_process');
 const path = require('path');
 const crypto = require('crypto');
-const { semverGt, pickRelease, shapeStatus, imageTags, isTerminal, apkAsset, sha256Matches, recoveryPage, isPublishTemp, fetchAsset,
-  envValue, applyLine } = require('./lib');
+const { pickRelease, shapeStatus, imageTags, isTerminal, apkAsset, sha256Matches, recoveryPage, isPublishTemp, fetchAsset,
+  envValue, applyLine, applyRefusal } = require('./lib');
 
 const PORT = +(process.env.SUPERVISOR_PORT || 9000);
 // Bind address. Docker keeps the default (all interfaces — the container has no published ports);
@@ -304,12 +304,11 @@ function spawnPhases(args, onClose) {
 // Apply the verified update. `trigger` is 'manual' or 'auto'. Only called when an update is available.
 function startApply(trigger) {
   if (apply && !isTerminal(apply.phase)) return { ok: false, code: 409, msg: 'apply already in progress' };
-  if (!state.updateAvailable || !lastManifest) return { ok: false, code: 400, msg: 'no verified update available' };
+  // The refusal says what is true (no verified release / already running X / X failed: use Roll back), decided from
+  // the verified manifest and `current` directly rather than the derived updateAvailable flag.
+  const refusal = applyRefusal({ manifest: lastManifest, current: currentVersion, skipVersion });
+  if (refusal) return { ok: false, code: 400, msg: refusal };
   const { version: toVersion } = imageTags(lastManifest);
-  if (!toVersion) return { ok: false, code: 400, msg: 'manifest has no version' };
-  // Belt and braces over updateAvailable: re-applying the running version would overwrite /backups/latest with a dump
-  // of the post-update database, and a later rollback would then restore nothing useful.
-  if (!semverGt(toVersion, currentVersion)) return { ok: false, code: 400, msg: 'already running ' + currentVersion };
 
   apply = { phase: 'authorizing', fromVersion: currentVersion, toVersion, trigger, startedAt: Date.now(), finishedAt: null, error: null };
   state.apply = apply;
