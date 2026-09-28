@@ -7,7 +7,8 @@ const os = require('os');
 const cp = require('child_process');
 const path = require('path');
 const crypto = require('crypto');
-const { pickRelease, shapeStatus, imageTags, isTerminal, apkAsset, sha256Matches, recoveryPage, isPublishTemp, fetchAsset } = require('./lib');
+const { pickRelease, shapeStatus, imageTags, isTerminal, apkAsset, sha256Matches, recoveryPage, isPublishTemp, fetchAsset,
+  envValue } = require('./lib');
 
 const PORT = +(process.env.SUPERVISOR_PORT || 9000);
 // Bind address. Docker keeps the default (all interfaces — the container has no published ports);
@@ -28,8 +29,19 @@ const PUBLISH_APK_TO = process.env.PUBLISH_APK_TO || '';
 const APPLY_SCRIPT = path.join(__dirname, 'apply.sh');
 const ROLLBACK_SCRIPT = path.join(__dirname, 'rollback.sh');
 
-// `current` is mutable: a successful apply advances it so the banner clears without a restart.
-let currentVersion = process.env.CURRENT_VERSION || '0.0.0';
+// The running release. With one-click apply (Docker) the source of truth is CURRENT_VERSION in the project's .env
+// (mounted at /project): apply.sh and rollback.sh rewrite it there, and compose reads the image tags from the same
+// file, while the container's own env is frozen at whatever it was when the supervisor was created. So it is re-read
+// at start and after every apply or rollback; the container env is only the fallback. Native installs
+// (APPLY_SUPPORTED=0) have no project .env: their CURRENT_VERSION comes from /etc/mdmesh/supervisor.env, which the
+// installer rewrites and then restarts the unit.
+const PROJECT_ENV = path.join(process.env.COMPOSE_PROJECT_DIR || '/project', '.env');
+function readCurrentVersion(fallback = process.env.CURRENT_VERSION || '0.0.0') {
+  if (!APPLY_SUPPORTED) return fallback;
+  try { return envValue(fs.readFileSync(PROJECT_ENV, 'utf8'), 'CURRENT_VERSION') || fallback; }
+  catch (e) { console.log('[version] cannot read', PROJECT_ENV + ':', String((e && e.code) || e), '- using', fallback); return fallback; }
+}
+let currentVersion = readCurrentVersion();
 // Last verified manifest from poll() — the source of the image refs an apply will deploy.
 let lastManifest = null;
 // Downloadable APK for the latest verified release {version,versionCode,sha256,url}; null if none.
@@ -255,7 +267,9 @@ function startApply(trigger) {
   apply = { phase: 'authorizing', fromVersion: currentVersion, toVersion, trigger, startedAt: Date.now(), finishedAt: null, error: null };
   state.apply = apply;
   spawnPhases([APPLY_SCRIPT, toVersion], (code) => {
-    if (code === 0) { currentVersion = toVersion; apply = { ...apply, phase: 'done', finishedAt: Date.now() }; }
+    // .env is the record of what is running now: toVersion on success, the restored version after apply.sh rolled back.
+    currentVersion = readCurrentVersion(code === 0 ? toVersion : currentVersion);
+    if (code === 0) { apply = { ...apply, phase: 'done', finishedAt: Date.now() }; }
     else if (!isTerminal(apply.phase)) { apply = { ...apply, phase: 'failed', finishedAt: Date.now() }; }
     else { apply = { ...apply, finishedAt: Date.now() }; }
     if (code !== 0 && apply.trigger === 'auto') lastAutoFailed = toVersion; // don't auto-retry a bad version
@@ -272,8 +286,11 @@ function startRollback() {
   apply = { phase: 'rollback', fromVersion: currentVersion, toVersion: null, trigger: 'rollback', startedAt: Date.now(), finishedAt: null, error: null };
   state.apply = apply;
   spawnPhases([ROLLBACK_SCRIPT], (code) => {
+    // rollback.sh wrote the restored CURRENT_VERSION to .env (even on a failed restore, .env names the images compose
+    // will run), so `current` follows it and the update to the version just rolled away from is offered again.
+    currentVersion = readCurrentVersion(currentVersion);
     if (!isTerminal(apply.phase)) apply = { ...apply, phase: code === 0 ? 'rolled_back' : 'failed' };
-    apply = { ...apply, finishedAt: Date.now() };
+    apply = { ...apply, toVersion: currentVersion, finishedAt: Date.now() };
     state.apply = apply;
     poll();
   });

@@ -50,8 +50,12 @@ healthy() {
 
 OLD_SERVER="$(get_env SERVER_VERSION)"
 OLD_WEB="$(get_env WEB_VERSION)"
-[ -n "$OLD_SERVER" ] || OLD_SERVER="${CURRENT_VERSION:-latest}"
-[ -n "$OLD_WEB" ]    || OLD_WEB="$OLD_SERVER"
+OLD_CURRENT="$(get_env CURRENT_VERSION)"
+[ -n "$OLD_SERVER" ]  || OLD_SERVER="${CURRENT_VERSION:-latest}"
+[ -n "$OLD_WEB" ]     || OLD_WEB="$OLD_SERVER"
+# CURRENT_VERSION is the release the supervisor reports; it can differ from the image tag (a :latest quick start
+# runs SERVER_VERSION=latest with CURRENT_VERSION=0.0.0), so it is snapshotted and restored on its own.
+[ -n "$OLD_CURRENT" ] || OLD_CURRENT="${CURRENT_VERSION:-$OLD_SERVER}"
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_SQL="$BACKUP_DIR/$STAMP.sql"
@@ -62,7 +66,7 @@ rollback() {
   phase rollback
   set_env SERVER_VERSION "$OLD_SERVER"
   set_env WEB_VERSION "$OLD_WEB"
-  set_env CURRENT_VERSION "$OLD_SERVER"
+  set_env CURRENT_VERSION "$OLD_CURRENT"
   dc up -d --no-deps server caddy || errln "rollback recreate failed"
   if [ -s "$BACKUP_SQL" ]; then
     if ! dc exec -T postgres psql -U "$DB_USER" "$DB_NAME" < "$BACKUP_SQL" >/dev/null 2>&1; then
@@ -75,7 +79,7 @@ rollback() {
 # ---------------- backup ----------------
 phase backup
 mkdir -p "$BACKUP_DIR"
-{ echo "SERVER_VERSION=$OLD_SERVER"; echo "WEB_VERSION=$OLD_WEB"; } > "$BACKUP_ENV"
+{ echo "SERVER_VERSION=$OLD_SERVER"; echo "WEB_VERSION=$OLD_WEB"; echo "CURRENT_VERSION=$OLD_CURRENT"; } > "$BACKUP_ENV"
 if ! dc exec -T postgres pg_dump --clean --if-exists -U "$DB_USER" "$DB_NAME" > "$BACKUP_SQL"; then
   errln "pg_dump failed — aborting before any change"
   rm -f "$BACKUP_SQL"

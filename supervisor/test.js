@@ -1,7 +1,7 @@
 const t = require('node:test');
 const a = require('node:assert');
 const { semverGt, pickRelease, shapeStatus, imageTags, nextPhase, isTerminal, apkAsset, sha256Matches, recoveryPage, isPublishTemp,
-  assetRequest, fetchAsset } = require('./lib');
+  assetRequest, fetchAsset, envValue } = require('./lib');
 
 t.test('semverGt', () => {
   a.equal(semverGt('1.2.4', '1.2.3'), true);
@@ -118,6 +118,17 @@ t.test('fetchAsset — no token: browser_download_url; non-redirect errors are r
   await a.rejects(fetchAsset({ browser_download_url: 'https://h/a' }, '', loop), /too many redirects/);
   a.equal(loop.calls.length, 6);
   await a.rejects(fetchAsset({}, 'tok', mockFetch({})), /no download URL/);
+});
+
+t.test('envValue — reads KEY=value from .env text the way apply.sh get_env does (first match), tolerating quotes/CRLF', () => {
+  const env = 'A=1\nCURRENT_VERSION=0.0.2\nCURRENT_VERSION=9.9.9\n# CURRENT_VERSION=bad\n';
+  a.equal(envValue(env, 'CURRENT_VERSION'), '0.0.2');
+  a.equal(envValue('CURRENT_VERSION="0.3.1"\r\n', 'CURRENT_VERSION'), '0.3.1');
+  a.equal(envValue("CURRENT_VERSION='0.3.1'  \n", 'CURRENT_VERSION'), '0.3.1');
+  a.equal(envValue('XCURRENT_VERSION=1\n', 'CURRENT_VERSION'), null);
+  a.equal(envValue('CURRENT_VERSION=\n', 'CURRENT_VERSION'), null);  // empty = unset
+  a.equal(envValue('', 'CURRENT_VERSION'), null);
+  a.equal(envValue(null, 'CURRENT_VERSION'), null);
 });
 
 t.test('sha256Matches — the APK publish gate', () => {
@@ -491,3 +502,119 @@ t.test('an unverifiable release logs why (HTTP status / minisign), without secre
     status = await (await fetch(`http://127.0.0.1:${sup.port}/update/status`)).json();
     a.match(status.error, /HTTP 404/);
   });
+
+// --- Stub docker + curl for driving apply.sh / rollback.sh without a daemon. The stub docker logs every call (one line
+// per call: its args) to $STUB_LOG and, for `compose exec -T postgres psql|pg_dump`, reads/writes stdio like the real
+// thing. Failure knobs (env): STUB_FAIL_RE (egrep on the args → exit 1), STUB_PSQL_FAIL=1 (psql prints an ERROR and
+// exits 3, as psql -v ON_ERROR_STOP=1 does). curl succeeds unless STUB_CURL_FAIL=1. ---
+function makeStubs(dir) {
+  const fs = require('fs'), path = require('path');
+  const bin = path.join(dir, 'bin');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, 'docker'), `#!/usr/bin/env bash
+echo "$*" >> "$STUB_LOG"
+if [ -n "\${STUB_FAIL_RE:-}" ] && echo "$*" | grep -Eq "$STUB_FAIL_RE"; then echo "stub: forced failure: $*" >&2; exit 1; fi
+case "$*" in
+  *" pg_dump "*) echo "-- stub dump"; echo "SELECT 1;";;
+  *" psql "*)
+    cat > "$STUB_LOG.stdin"
+    if [ "\${STUB_PSQL_FAIL:-0}" = 1 ]; then echo 'psql:<stdin>:12: ERROR:  relation "x" does not exist' >&2; exit 3; fi;;
+esac
+exit 0
+`, { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'curl'), '#!/usr/bin/env bash\n[ "${STUB_CURL_FAIL:-0}" = 1 ] && exit 7\nexit 0\n', { mode: 0o755 });
+  return bin;
+}
+/** A deploy dir (project/.env) + backups dir + stubs under a fresh temp dir. */
+function makeDeploy(envText) {
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sup-sh-'));
+  const project = path.join(dir, 'project'), backups = path.join(dir, 'backups');
+  fs.mkdirSync(project); fs.mkdirSync(backups);
+  fs.writeFileSync(path.join(project, '.env'), envText);
+  const bin = makeStubs(dir);
+  const log = path.join(dir, 'docker.log');
+  fs.writeFileSync(log, '');
+  const env = { ...process.env, PATH: bin + path.delimiter + process.env.PATH, STUB_LOG: log, COMPOSE_PROJECT_DIR: project,
+    BACKUP_DIR: backups, HEALTH_TIMEOUT: '1', HEALTH_URL: 'http://stub/health' };
+  return { dir, project, backups, log, env,
+    envFile: () => fs.readFileSync(path.join(project, '.env'), 'utf8'),
+    calls: () => fs.readFileSync(log, 'utf8').split('\n').filter(Boolean) };
+}
+function runScript(name, args, env) {
+  const r = cp.spawnSync('bash', [require('path').join(__dirname, name), ...args], { env, encoding: 'utf8', timeout: 30000 });
+  return { code: r.status, out: r.stdout, err: r.stderr, all: r.stdout + r.stderr };
+}
+
+t.test('supervisor start: CURRENT_VERSION comes from the project .env (what apply/rollback write), not the stale container env',
+  { timeout: 20000 }, async (tt) => {
+    const fs = require('fs'), path = require('path');
+    const d = makeDeploy('SERVER_VERSION=0.0.2\nCURRENT_VERSION=0.0.2\n');
+    let sup = null;
+    tt.after(async () => { await stopChild(sup && sup.child); fs.rmSync(d.dir, { recursive: true, force: true }); });
+    const status = async () => (await fetch(`http://127.0.0.1:${sup.port}/update/status`)).json();
+
+    // A restart after an apply: the container env still says 0.0.1, .env says 0.0.2.
+    sup = await spawnSupervisor(d.dir, { APPLY_SUPPORTED: '1', CURRENT_VERSION: '0.0.1', COMPOSE_PROJECT_DIR: d.project }, /supervisor on/);
+    a.equal((await status()).current, '0.0.2', 'the version apply.sh wrote to .env wins over the container env');
+    await stopChild(sup.child);
+
+    // No CURRENT_VERSION in .env (or no .env): the container env is the fallback.
+    fs.writeFileSync(path.join(d.project, '.env'), 'SERVER_VERSION=0.0.2\n');
+    sup = await spawnSupervisor(d.dir, { APPLY_SUPPORTED: '1', CURRENT_VERSION: '0.0.1', COMPOSE_PROJECT_DIR: d.project }, /supervisor on/);
+    a.equal((await status()).current, '0.0.1');
+    await stopChild(sup.child);
+
+    // Native (APPLY_SUPPORTED=0): nothing writes a project .env there; the unit's env is the only source, even if a
+    // stray .env exists at the project path.
+    fs.writeFileSync(path.join(d.project, '.env'), 'CURRENT_VERSION=7.7.7\n');
+    sup = await spawnSupervisor(d.dir, { APPLY_SUPPORTED: '0', CURRENT_VERSION: '0.4.0', COMPOSE_PROJECT_DIR: d.project }, /supervisor on/);
+    a.equal((await status()).current, '0.4.0');
+  });
+
+t.test('rollback resets /update/status current to the version it restored', { timeout: 30000 }, async (tt) => {
+  const fs = require('fs'), path = require('path');
+  // State after a successful apply 0.0.1 → 0.0.2: .env bumped, backup snapshot of the old versions + dump.
+  const d = makeDeploy('SERVER_VERSION=0.0.2\nWEB_VERSION=0.0.2\nCURRENT_VERSION=0.0.2\n');
+  fs.writeFileSync(path.join(d.backups, 'latest'), '20260927-120000\n');
+  fs.writeFileSync(path.join(d.backups, '20260927-120000.env'), 'SERVER_VERSION=0.0.1\nWEB_VERSION=0.0.1\nCURRENT_VERSION=0.0.1\n');
+  fs.writeFileSync(path.join(d.backups, '20260927-120000.sql'), 'SELECT 1;\n');
+  fs.writeFileSync(path.join(d.dir, 'recovery.token'), 'tok123');
+  let sup = null;
+  tt.after(async () => { await stopChild(sup && sup.child); fs.rmSync(d.dir, { recursive: true, force: true }); });
+  sup = await spawnSupervisor(d.dir, { ...d.env, APPLY_SUPPORTED: '1', CURRENT_VERSION: '0.0.1', SERVER_BASE: 'http://127.0.0.1:9' },
+    /supervisor on/);
+  const status = async () => (await fetch(`http://127.0.0.1:${sup.port}/update/status`)).json();
+  a.equal((await status()).current, '0.0.2');
+  const r = await fetch(`http://127.0.0.1:${sup.port}/update/rollback`, { method: 'POST',
+    headers: { 'X-MDMesh-Console': '1', 'X-Recovery-Token': 'tok123' } });
+  a.equal(r.status, 202);
+  const s = await waitFor(async () => { const x = await status(); return isTerminal(x.apply && x.apply.phase) && x; }, 'rollback to finish', 20000);
+  a.equal(s.apply.phase, 'rolled_back', sup.log());
+  a.equal(s.current, '0.0.1', 'current follows the rollback');
+  a.equal(s.apply.toVersion, '0.0.1', 'the rollback view names the version it restored');
+  a.match(d.envFile(), /^CURRENT_VERSION=0\.0\.1$/m);
+});
+
+t.test('rollback.sh restores CURRENT_VERSION from the snapshot (not SERVER_VERSION), and apply.sh snapshots it', () => {
+  const fs = require('fs'), path = require('path');
+  // A :latest quick-start (SERVER_VERSION=latest, CURRENT_VERSION=0.0.0) applied 0.0.2; rolling back must restore
+  // CURRENT_VERSION=0.0.0, not "latest" (which is no version at all and would hide every future update).
+  const d = makeDeploy('SERVER_VERSION=latest\nWEB_VERSION=latest\nCURRENT_VERSION=0.0.0\n');
+  try {
+    let r = runScript('apply.sh', ['0.0.2'], { ...d.env, STUB_CURL_FAIL: '0' });
+    a.equal(r.code, 0, r.all);
+    const stamp = fs.readFileSync(path.join(d.backups, 'latest'), 'utf8').trim();
+    a.match(fs.readFileSync(path.join(d.backups, stamp + '.env'), 'utf8'), /^CURRENT_VERSION=0\.0\.0$/m, 'apply.sh snapshots CURRENT_VERSION');
+    a.match(d.envFile(), /^CURRENT_VERSION=0\.0\.2$/m);
+    r = runScript('rollback.sh', [], d.env);
+    a.equal(r.code, 0, r.all);
+    a.match(d.envFile(), /^CURRENT_VERSION=0\.0\.0$/m);
+    a.match(d.envFile(), /^SERVER_VERSION=latest$/m);
+    // An older snapshot without CURRENT_VERSION still falls back to its SERVER_VERSION.
+    fs.writeFileSync(path.join(d.backups, stamp + '.env'), 'SERVER_VERSION=0.0.1\nWEB_VERSION=0.0.1\n');
+    r = runScript('rollback.sh', [], d.env);
+    a.equal(r.code, 0, r.all);
+    a.match(d.envFile(), /^CURRENT_VERSION=0\.0\.1$/m);
+  } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
+});

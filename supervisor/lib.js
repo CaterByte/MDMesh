@@ -99,6 +99,15 @@ async function fetchAsset(asset, token, fetchImpl = globalThis.fetch, maxRedirec
   throw new Error('too many redirects');
 }
 
+/** The value of `key` in .env text, read like apply.sh's get_env (the first `KEY=` line), with surrounding quotes,
+ *  trailing whitespace and a CR removed. Empty or absent → null. */
+function envValue(text, key) {
+  const line = String(text || '').split('\n').find((l) => l.startsWith(key + '='));
+  if (line == null) return null;
+  const v = line.slice(key.length + 1).trim().replace(/^(['"])(.*)\1$/, '$2');
+  return v || null;
+}
+
 // Apply is a linear state machine the console + recovery page poll. The happy path advances
 // authorizing → backup → pull → recreate → healthcheck → done. On any failure apply.sh jumps to
 // `rollback` (transient) and ends at `rolled_back` or, if rollback itself fails, `failed`.
@@ -141,5 +150,5 @@ function recoveryPage(html, applySupported) {
 module.exports = {
   parseSemver, semverGt, pickRelease, shapeStatus,
   imageTags, nextPhase, isTerminal, APPLY_PHASES, APPLY_TERMINAL,
-  apkAsset, sha256Matches, recoveryPage, isPublishTemp, assetRequest, fetchAsset,
+  apkAsset, sha256Matches, recoveryPage, isPublishTemp, assetRequest, fetchAsset, envValue,
 };

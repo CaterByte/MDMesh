@@ -47,7 +47,11 @@ SQL_SNAP="$BACKUP_DIR/$STAMP.sql"
 if [ -f "$ENV_SNAP" ]; then
   OLD_SERVER="$(grep -E '^SERVER_VERSION=' "$ENV_SNAP" | head -1 | cut -d= -f2-)"
   OLD_WEB="$(grep -E '^WEB_VERSION=' "$ENV_SNAP" | head -1 | cut -d= -f2-)"
-  [ -n "$OLD_SERVER" ] && { set_env SERVER_VERSION "$OLD_SERVER"; set_env CURRENT_VERSION "$OLD_SERVER"; }
+  # Snapshots from before CURRENT_VERSION was recorded fall back to the server tag, as they always did.
+  OLD_CURRENT="$(grep -E '^CURRENT_VERSION=' "$ENV_SNAP" | head -1 | cut -d= -f2-)"
+  [ -n "$OLD_CURRENT" ] || OLD_CURRENT="$OLD_SERVER"
+  [ -n "$OLD_SERVER" ] && set_env SERVER_VERSION "$OLD_SERVER"
+  [ -n "$OLD_CURRENT" ] && set_env CURRENT_VERSION "$OLD_CURRENT"
   [ -n "$OLD_WEB" ] && set_env WEB_VERSION "$OLD_WEB"
 else
   errln "version snapshot $ENV_SNAP missing — recreating current images"
