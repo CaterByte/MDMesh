@@ -1,0 +1,72 @@
+# Editor defaults for the whole monorepo, derived from the code as it is (not a new style).
+# Read by IntelliJ/Android Studio, VS Code (EditorConfig extension), ktlint and — later — Prettier
+# (it maps indent_style/indent_size/max_line_length/end_of_line). Nothing here reformats files; it
+# only sets what an editor does on save/new lines. Vendored upstream assets opt out at the bottom.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Java (server, common, jwt, notification, plugins) — 4 spaces, as in all 425 .java files.
+[*.java]
+indent_size = 4
+
+# Kotlin agent + Gradle Kotlin DSL — 4 spaces (all 157 .kt / 9 .kts files). 120 matches detekt's
+# MaxLineLength default; the few longer lines are in the detekt baseline.
+[*.{kt,kts}]
+indent_size = 4
+max_line_length = 120
+
+# Android resources/manifests in the agent use 4; Maven POMs, MyBatis mappers and Liquibase use 2.
+[agent-android/**.xml]
+indent_size = 4
+
+# The detekt baseline is generated (./gradlew detektBaseline) with 2 spaces; keep it that way.
+[agent-android/config/detekt/baseline.xml]
+indent_size = 2
+
+# Tomcat context files use 4.
+[{install/context_template.xml,server/conf/context.xml}]
+indent_size = 4
+
+# ProGuard rules follow the Kotlin side; Python (the vendored CI kit) is PEP 8.
+[*.{pro,py}]
+indent_size = 4
+
+# Markdown: two trailing spaces are a hard line break.
+[*.md]
+trim_trailing_whitespace = false
+
+# The edge's Caddyfile is tab-indented (the style `caddy fmt` writes).
+[Caddyfile]
+indent_style = tab
+
+# Contract goldens are compared byte for byte (the .sha256 pins the .json's exact bytes); saving must not change them.
+[common/src/test/resources/contract/**]
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+
+# Email templates are read verbatim: a subject file that gains a final newline changes the mail header.
+[install/emails/**]
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+
+# Two upstream translation files start with a UTF-8 BOM; charset = utf-8 would drop it on save.
+[plugins/deviceinfo/src/main/resources/plugin_deviceinfo_translations_*.properties]
+charset = unset
+
+# Windows batch files keep their line endings.
+[*.bat]
+end_of_line = unset
+
+# Vendored or inherited-from-upstream assets we do not restyle: leave whatever is there alone.
+[{plugins/**/webapp/**,server/src/main/webapp/**,letsencrypt-ssl.sh,iptables-tomcat.sh,init-plugin.sh,init-plugin.bat,**/*.sql,TROUBLESHOOTING.txt}]
+indent_style = unset
+indent_size = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset

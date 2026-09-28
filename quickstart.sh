@@ -96,6 +96,10 @@ curl -fsSL "${RAW}/install/sql/post_seed.sql"    -o install/sql/post_seed.sql
 mkdir -p install/lib
 curl -fsSL "${RAW}/install/lib/db.sh"             -o install/lib/db.sh
 # Shared seed rules with setup.sh / the native installer (seed gate, verified seed, post-seed repairs).
+# Version coupling: this script runs from main, but db.sh (like the compose file and the seed) comes from the release
+# tag being installed, so it matches the images (from ${BRANCH} only when the release can't be resolved; see RAW).
+# Call only db.sh functions, with only the arguments and output, that the latest published release already has; a
+# db.sh change becomes usable here once a release ships it. (install/lib/db.sh states the same rule for its side.)
 # shellcheck source=install/lib/db.sh
 . ./install/lib/db.sh
 
@@ -131,18 +135,37 @@ say "Wrote .env (secrets generated). docker compose reads COMPOSE_FILE/PROFILES 
 
 say "Pulling images…"
 docker compose pull || { err "Could not pull the :${IMAGE_TAG} images from ghcr.io/${IMAGE_OWNER}. Has a release been published? (cut one with: git tag v0.1.0 && git push --tags)"; exit 1; }
+# The init marker the wait below reads is on the server's data volume, and the server writes it only when it is absent.
+# The entrypoint removes the previous start's marker only in images after v0.3.1, and this script (served from main) may
+# be installing v0.3.1 or older, so a re-run over an existing volume would read the last run's result. Remove it here:
+# the old server stopped first (so it cannot write it again in between), then a one-off container of the server image
+# that runs rm as the server's own user (never as root on the volume; rm -f removes a planted link, not its target).
+# On a fresh install there is no container to stop and no marker to remove, and the one-off only creates the volume
+# that `up` would create anyway.
 say "Starting the stack…"
+docker compose stop server >/dev/null 2>&1 || true
+docker compose run --rm --no-deps -T -u mdmesh --entrypoint rm server -f /opt/mdmesh/initialized.txt \
+  || { err "Could not remove the previous start's init marker (/opt/mdmesh/initialized.txt) from the server's volume."; exit 1; }
 docker compose up -d
 
 say "Waiting for the server to finish first-boot (Liquibase)…"
 BOOTED=0
 for _ in $(seq 1 60); do
-  if docker compose exec -T server test -f /opt/mdmesh/initialized.txt 2>/dev/null; then BOOTED=1; break; fi
-  sleep 5
+  sleep 5   # first: `up -d` can return before the entrypoint has removed the previous start's marker
+  if docker compose exec -T server test -s /opt/mdmesh/initialized.txt 2>/dev/null; then BOOTED=1; break; fi
 done
 if [ "$BOOTED" != 1 ]; then
   err "Server did not finish first-boot within ~5 minutes. Last server logs:"
   docker compose logs --tail 40 server 2>&1 || true
+  err "Fix the issue above and re-run the quick start from this directory ($(pwd))."; exit 1
+fi
+# The marker holds "OK" or the server's initialization error (docker/entrypoint.sh removes the previous start's marker,
+# so it is this boot's). It is read as the server's own user: the volume is that account's, and the container's root
+# would follow a link planted there.
+INIT_RESULT=$(docker compose exec -T -u mdmesh server cat /opt/mdmesh/initialized.txt 2>/dev/null || true)
+if ! grep -q '^OK' <<< "$INIT_RESULT"; then
+  err "The server reported an initialization error:"
+  printf '%s\n' "${INIT_RESULT:0:2000}" | tr -d '\000-\010\013-\037\177' | sed 's/^/    /'   # the server's text: no control chars
   err "Fix the issue above and re-run the quick start from this directory ($(pwd))."; exit 1
 fi
 

@@ -1,0 +1,42 @@
+# Build context of every image (docker build -f docker/<name>.Dockerfile . ; compose `build: context: .`). The
+# Dockerfiles build from sources, so local build output, dependencies, VCS data and private or secret files never
+# belong in it: they only slow the build, and some break it (a symlinked web/node_modules replaces the one `npm ci`
+# installed) or leak into an image (a local server/build.properties or .env). Never list a tracked file here.
+.git
+**/node_modules
+**/target
+web/dist
+web/.vite
+**/*.tsbuildinfo
+agent-android/.gradle
+agent-android/.kotlin
+agent-android/**/build
+agent-android/local.properties
+server/build.properties
+# Legacy AngularJS console output (grunt/bower): webapp/lib would otherwise be packaged into ROOT.war.
+server/src/main/webapp/lib
+server/webtarget
+**/bower_components
+# Log files that local dev runs wrote under the literal _BASE_DIRECTORY_ placeholder path before the server logged to
+# stdout only; old checkouts may still hold them, wherever a run left them.
+**/_BASE_DIRECTORY_
+reference
+brain
+.claude
+.superpowers
+.idea
+**/*.iml
+**/.env
+**/.env.local
+**/.env.*.local
+**/*.log
+**/*.bak
+**/*.orig
+**/*.swp
+**/*~
+**/.DS_Store
+**/Thumbs.db
+**/*.apk
+**/*.aab
+**/*.jks
+**/*.keystore

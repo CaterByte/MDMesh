@@ -1,13 +1,14 @@
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// The Headwind server serves its REST API under the `/rest` context. The
-// backend runs on :8090 on the same host, so during development (and when this
-// SPA is served over the LAN) we proxy `/rest` there, sharing the session
-// cookie (JSESSIONID). Override the target with VITE_DEV_PROXY_TARGET.
+// Dev server. Every same-origin path the console calls is proxied to the dev stack's edge (Caddy on :8088, see
+// docker-compose.dev.yml), which routes it exactly as production does: /rest, /files and /agent/ws to the server,
+// /update and /recovery to the supervisor. Override the target with VITE_DEV_PROXY_TARGET.
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_');
-  const proxyTarget = env.VITE_DEV_PROXY_TARGET || 'http://localhost:8090';
+  const target = env.VITE_DEV_PROXY_TARGET || 'http://localhost:8088';
+  // The server is session-cookie based (JSESSIONID), so cookies must be forwarded. /agent/ws is a WebSocket.
+  const route = (ws = false) => ({ target, changeOrigin: true, cookieDomainRewrite: '', ws });
 
   return {
     plugins: [react()],
@@ -16,12 +17,11 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       allowedHosts: true,
       proxy: {
-        '/rest': {
-          target: proxyTarget,
-          changeOrigin: true,
-          // The server is session-cookie based, so we must forward cookies.
-          cookieDomainRewrite: '',
-        },
+        '/rest': route(),
+        '/files': route(),
+        '/agent/ws': route(true),
+        '/update': route(),
+        '/recovery': route(),
       },
     },
   };

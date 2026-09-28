@@ -127,8 +127,8 @@ docker image rm $(docker image ls 'ghcr.io/mdmesh-app/mdmesh-*' -q) 2>/dev/null 
 `docker compose down` without `-v` keeps the data volumes, so a later `./setup.sh` picks up where you left off.
 
 **Native.** `sudo ./install/uninstall-native.sh` shows exactly what it will remove (Tomcat under `/opt/mdmesh-tc`,
-the app dir `/opt/mdmesh`, the `mdmesh-server` and `mdmesh-supervisor` units, the `mdmesh` system user, the install
-log, and the `mdmesh` database + role),
+the app dir `/opt/mdmesh`, the `mdmesh-server` and `mdmesh-supervisor` units and the supervisor's settings in
+`/etc/mdmesh`, the `mdmesh` system user, the install log, and the `mdmesh` database + role),
 writes a final `pg_dump` to `/root`, and only proceeds when you type `UNINSTALL`. `--keep-data` removes the code
 and services but leaves the database, `/opt/mdmesh/files` and `/opt/mdmesh/backups` in place; `-y` skips the
 prompt for scripted use. Packages installed by apt, your reverse proxy and the git checkout are never touched.
@@ -160,10 +160,10 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
 | `POLL_INTERVAL_HOURS` | How often to check (default `6`). |
 | `GITHUB_TOKEN` | Optional — raises the API rate limit / reads a private repo. |
 | `IMAGE_OWNER` | GHCR owner (lowercase) the versioned images live under. |
-| `SERVER_VERSION` / `WEB_VERSION` | Running image tags **without the `v`** (`0.2.6`, not `v0.2.6`); bumped automatically on apply. |
-| `CURRENT_VERSION` | The running release, compared with GitHub's latest to decide "update available". Bumped on apply; `./setup.sh` rewrites it on every run from the checkout's latest tag (`git describe --tags`), like the native installer. |
-| `SUPERVISOR_VERSION` | The supervisor's image tag. Apply never changes it (the supervisor never updates itself). The quick start tracks `latest`, so `docker compose pull && docker compose up -d` delivers supervisor fixes; pin it only if you want to freeze it (then bump it by hand to pick up fixes). |
-| `APPLY_SUPPORTED` | `1` shows one-click **Update**, `0` shows the manual steps instead. `./setup.sh` rewrites it on every run from `IMAGE_OWNER` (`local` → `0`); the source compose file defaults to `0`, the release compose to `1`. |
+| `SERVER_VERSION` / `WEB_VERSION` | Running image tags **without the `v`** (`0.2.6`, not `v0.2.6`); bumped automatically on apply. `./setup.sh` builds every image from the checkout, so on every run it sets them to the checkout's version (whatever `IMAGE_OWNER` is): the images are named after the code they hold. |
+| `CURRENT_VERSION` | The running release, compared with GitHub's latest to decide "update available". Bumped on apply. `./setup.sh` rewrites it on every run from the checkout's nearest release tag (`vX.Y.Z` or `vX.Y.Z-pre`; other tags are skipped), like the native installer, and with a registry `IMAGE_OWNER` refuses a checkout older than it, or one without a release tag (see below). |
+| `SUPERVISOR_VERSION` | The supervisor's image tag. Apply never changes it (the supervisor never updates itself). The quick start tracks `latest`, so `docker compose pull && docker compose up -d` delivers supervisor fixes; pin it only if you want to freeze it (then bump it by hand to pick up fixes). `./setup.sh` builds the supervisor from the checkout and sets it to the checkout's version on every run. |
+| `APPLY_SUPPORTED` | `1` shows one-click **Update**, `0` shows the manual steps instead. `./setup.sh` rewrites it on every run from `IMAGE_OWNER` (`local` or unset → `0`); the source compose file defaults to `0`, the release compose to `1`. |
 | `AUTO_UPDATE` | `1` to apply verified releases unattended (also toggleable in **Settings**). |
 
 - **One-click:** when a verified update is available, a banner appears in the console; an admin clicks
@@ -179,14 +179,89 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
   `curl 127.0.0.1:9000/recovery` (not `https://<host>/recovery`).
 - **Source (build) deploys** can't auto-pull, so setup.sh hides one-click Update (`APPLY_SUPPORTED=0`); update with
   `git pull && ./setup.sh`. Re-running `./setup.sh` (rather than `docker compose up -d --build` alone) is what refreshes
-  `CURRENT_VERSION` and `APPLY_SUPPORTED`; without a readable tag (no git, or tags not fetched) it keeps the old
-  `CURRENT_VERSION` and warns.
+  `CURRENT_VERSION`, the image tags and `APPLY_SUPPORTED`; without a release tag (no git, tags not fetched, or only
+  non-release tags) it keeps the old values and warns.
+- **`./setup.sh` with a registry `IMAGE_OWNER`** (one-click Update on) still builds the stack from the checkout, and
+  apply may since have moved it to a newer release. If the checkout is older than the running `CURRENT_VERSION`,
+  setup.sh stops before changing anything (`running 0.4.0, checkout is 0.3.1 — git pull first, or re-run with
+  --allow-downgrade`). `git pull` first; `./setup.sh --allow-downgrade` builds and runs the older code on purpose
+  (against the current database, which is not rolled back). It also stops when it can't tell which version the
+  checkout is (no readable release tag: a source tarball, or tags not fetched); build from a tagged git checkout, or
+  pass `--allow-downgrade` to build that code anyway. It then keeps the image tags and `CURRENT_VERSION` that `.env`
+  already holds: on a fresh install that is `0.0.0`, so every release shows as an update.
+- `./setup.sh` rejects an unknown option with a usage error (Docker mode). With `--native` it passes its other flags
+  (such as `-y`), wherever they stand, to the native installer; `--reset` and `--allow-downgrade` are Docker-mode
+  flags, and `--native` ignores them.
 - Older agents keep working across server updates (versioned `/agent/v1` contract; see
   `docs/adr/0009-agent-v1-contract-stability.md`).
 
+## Server logs
+
+The server logs to stdout only, at INFO: read it with `docker compose logs -f server` (Docker) or
+`journalctl -u mdmesh-server -f` (native). Audit events (sign-ins, password changes, edits to devices, configurations,
+applications and groups) are the lines of the `AuditLogger` logger, for example
+`docker compose logs server | grep AuditLogger`; the audit plugin also stores them in the `plugin_audit_log` table.
+Tomcat also writes its own files (`catalina.<date>.log`, which repeats its console lines and the database migrations,
+and the HTTP access log) under `/usr/local/tomcat/logs` in the container and `/opt/mdmesh-tc/logs` on native installs.
+
+Docker's default `json-file` log driver keeps container logs without a size limit. To cap them, set `log-opts` in
+`/etc/docker/daemon.json` (for example `"log-opts": {"max-size": "10m", "max-file": "5"}`) and recreate the
+containers. journald caps the journal on its own.
+
+An install upgraded from v0.2.1–v0.3.x keeps `/opt/mdmesh/log4j-mdmesh.xml` (and `/opt/mdmesh/logs/`, if a development build
+created it). The server no longer reads or writes them; delete them if you like.
+
+For a temporary DEBUG log, put a log4j 1.2 XML config at `/opt/mdmesh/log4j-debug.xml` and start the server with
+the JVM flag `-Dlog4j.configuration=file:///opt/mdmesh/log4j-debug.xml`:
+- Docker: `docker compose cp log4j-debug.xml server:/opt/mdmesh/`, add
+  `SERVER_JAVA_OPTS=-Dlog4j.configuration=file:///opt/mdmesh/log4j-debug.xml` to `.env` (the server gets it as
+  `JAVA_OPTS`), then `docker compose up -d server`. Quote a value that holds several flags
+  (`SERVER_JAVA_OPTS="-Xmx1g -Dlog4j.configuration=file:///opt/mdmesh/log4j-debug.xml"`): `setup.sh` reads `.env` as
+  shell, and an unquoted space stops it. A quick-start install made before this release also needs the line
+  `JAVA_OPTS: ${SERVER_JAVA_OPTS:-}` under `server:` → `environment:` in its `docker-compose.yml` for that.
+- Native: copy the file there (readable by the `mdmesh` user), run `systemctl edit mdmesh-server`, add
+  `Environment=JAVA_OPTS=-Dlog4j.configuration=file:///opt/mdmesh/log4j-debug.xml` under `[Service]`, then
+  `systemctl restart mdmesh-server`.
+
+Undo it the same way afterwards: DEBUG logs every SQL statement.
+
+## Health checks
+
+Docker installs answer two unauthenticated probes at the edge, for uptime monitors. Each returns `200 ok` or a
+`503` with a short reason, never the console page. A trailing slash (`/healthz/`, `/healthz/supervisor/`) works too.
+
+| Probe | `200 ok` when | `503` when |
+|-------|---------------|------------|
+| `https://<host>/healthz` | Caddy is up **and** the API server answers `GET /rest/public/name` with a 2xx (the probe an update uses to decide the new version is healthy) | `server unavailable`: the server is stopped, still starting, or answering with errors |
+| `https://<host>/healthz/supervisor` | the updater/recovery supervisor answers its own `/healthz` | `supervisor unavailable`: the supervisor is down. The console, the API and enrolled devices keep working, but update checks, the recovery page and the `/files/agent.apk` mirror that new enrollments download do not |
+
+No answer at all means the edge itself is down. Neither probe queries the database: `docker compose ps` shows
+`postgres` as `healthy` from its own `pg_isready` check. `/healthz` also fails, as it should, for the minute or so
+an update takes to recreate the server.
+
+**Native installs** have no edge probes: `/healthz` and `/healthz/supervisor` answer `404`, never the console page
+(an install from before this release serves the console there until its next installer run, `sudo ./setup.sh
+--native -y`). Point the monitor at `https://<host>/rest/public/name` through your proxy, and check the supervisor,
+which listens on loopback `:9000` only, on the host with `curl -fsS 127.0.0.1:9000/healthz` or
+`systemctl is-active mdmesh-supervisor`.
+
 ## Security notes
 
-- Secrets (`DB_PASSWORD`, `HASH_SECRET`, admin password) are generated per install; `.env` is `chmod 600`.
+- Secrets (`DB_PASSWORD`, `HASH_SECRET`, admin password, JWT signing key) are generated per install; `.env` is
+  `chmod 600`.
+- The JWT signing key signs the tokens of REST API clients that sign in through `/rest/public/jwt/login`; the console
+  itself uses a session cookie. It is generated once and kept, so those tokens survive restarts and upgrades.
+  **Docker:** the server generates it on its first start into its data volume (`/opt/mdmesh/jwt.secret`, mode 600)
+  and reuses it on every start; an install made before it existed gets one on its first start of the new image, with
+  no manual step. It is not in `.env`, so `docker compose down -v` deletes it with the volume and API clients sign in
+  again. To pin it, set `SERVER_JWT_SECRET=<output of openssl rand -hex 64>` in `.env` (the server gets it as
+  `JWT_SECRET`); it wins over the file. A quick-start install made before this release also needs the line
+  `JWT_SECRET: ${SERVER_JWT_SECRET:-}` under `server:` → `environment:` in its `docker-compose.yml` for that.
+  **Native:** the installer writes it as `jwt.secretkey` in Tomcat's `ROOT.xml` (mode 600, next to `hash.secret`) and
+  keeps it across re-runs and upgrades; an install made before it existed gets one on its next installer run. Use
+  only a hex value that is a multiple of 4 characters and at least 128 long: the JWT library silently drops other
+  characters, so the Docker server refuses to start with any other `SERVER_JWT_SECRET` (and replaces a key file that
+  holds one), and the native installer replaces such a `jwt.secretkey`.
 - TLS everywhere (Cloudflare or Caddy/Let's Encrypt). DB + server ports are never published.
 - The agent talks HTTPS only. Set `SECURE_ENROLLMENT=1` (and the matching secret on the agent) to
   require signed enrollment.
@@ -196,3 +271,8 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
 - The supervisor mounts the Docker socket (to drive updates) and is trusted: it acts only on
   **minisign-verified** manifests and **authorized** callers (admin session, or the recovery token).
   Apply/rollback only ever recreate `server`/`caddy` — never `postgres` or the supervisor itself.
+- On native installs the supervisor runs as the unprivileged `mdmesh` user (like Tomcat), with its settings in the
+  root-owned `/etc/mdmesh/supervisor.env`. A `GITHUB_TOKEN` there reaches the supervisor's environment, which that user
+  can read, so use a read-only token.
+- The native installer stops if the `mdmesh` account has a crontab or `at` jobs (it never needs any): inspect them
+  (`crontab -l -u mdmesh`, `atq`), remove them (`crontab -r -u mdmesh`, `atrm <id>`) and re-run.

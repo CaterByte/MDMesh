@@ -20,7 +20,12 @@ RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM caddy:2-alpine
+# An exact Caddy release, not caddy:2-alpine: a Caddy release can change how docker/Caddyfile parses (v0.3.1's
+# Cloudflare-mode outage was a Caddyfile that stopped parsing). Dependabot proposes each new release in its weekly
+# docker-images PR, and T0's edge check (scripts/edge-check.sh, which reads the image from this line) validates the
+# Caddyfile in every hosting mode against it before it can merge. The tag itself is still rebuilt upstream for
+# Alpine fixes.
+FROM caddy:2.11.4-alpine
 # Run Caddy unprivileged. It still needs to bind :80/:443 in own-domain mode, so grant just that capability
 # to the binary; /data (certs) and /config are mounted volumes that older deployments created root-owned,
 # so a tiny root entrypoint fixes their ownership and then su-execs to "caddy".

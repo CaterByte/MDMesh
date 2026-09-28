@@ -32,8 +32,6 @@
 
     <Parameter name="aapt.command" value="${aapt.command}"/>
 
-    <Parameter name="log4j.config" value="${log4j.config}"/>
-
     <Parameter name="plugin.photo.enable.places" value="${plugin.photo.enable.places}"/>
 
     <!-- If Headwind MDM uses an embedded MQTT broker, this parameter is a

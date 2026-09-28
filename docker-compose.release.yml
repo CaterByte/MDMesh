@@ -37,12 +37,17 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
       BASE_URL: ${BASE_URL:?set BASE_URL in .env}
       HASH_SECRET: ${HASH_SECRET:?set HASH_SECRET in .env}
+      # Optional; unset = the key the server keeps in its volume. Prefixed .env key for the reason given at JAVA_OPTS.
+      JWT_SECRET: ${SERVER_JWT_SECRET:-}
       SECURE_ENROLLMENT: ${SECURE_ENROLLMENT:-0}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-25}
       SMTP_FROM: ${SMTP_FROM:-mdm@localhost}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # Optional JVM flags, e.g. a temporary DEBUG log config (DEPLOY.md "Server logs"). Read from the prefixed .env key:
+      # compose lets the shell override .env, and a generic JAVA_OPTS exported on a Java host must not reach the server.
+      JAVA_OPTS: ${SERVER_JAVA_OPTS:-}
     volumes:
       - mdmeshdata:/opt/mdmesh
 

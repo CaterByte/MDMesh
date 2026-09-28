@@ -9,9 +9,8 @@ kotlinx.serialization + Retrofit.
 - Identity is a **server-issued device id** (DataStore). The agent never uses
   IMEI/IMSI/serial as identity (restricted post-Android 10).
 
-> This scaffold will not build on a box without the Android SDK/Gradle. It is
-> structured to compile cleanly in CI or a provisioned dev box once an SDK is
-> present.
+> Building needs JDK 17 and the Android SDK: set `ANDROID_HOME`, or `sdk.dir` in
+> `local.properties` (gitignored). Gradle itself comes from the committed wrapper.
 
 ## Module map
 
@@ -50,17 +49,14 @@ to the same server without special-casing. Unknown command types degrade to
 ## Build
 
 ```bash
-# One-time: generate the binary wrapper jar (cannot be committed from this box).
-gradle wrapper --gradle-version 8.10.2
-
-# Then the usual:
-./gradlew assembleDebug
-./gradlew test          # :proto + :core JVM unit tests
+./gradlew assembleDebug                                      # app/build/outputs/apk/debug/app-debug.apk
+./gradlew detekt assembleDebug lintDebug testDebugUnitTest   # what CI runs (T0)
 ```
 
-> The repo ships `gradlew`, `gradlew.bat`, and `gradle/wrapper/gradle-wrapper.properties`,
-> but **not** `gradle/wrapper/gradle-wrapper.jar` (a binary). Run `gradle wrapper`
-> once on a machine that has a system Gradle to materialise it.
+> The Gradle wrapper is committed (`gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar`
+> and `.properties`, pinned to Gradle 8.10.2), so no system Gradle is needed: the first `./gradlew`
+> run downloads that version. Upgrade it with `./gradlew wrapper --gradle-version <version>` and
+> commit all four files.
 
 Release signing reads from env vars (`MDM_RELEASE_STORE_FILE`,
 `MDM_RELEASE_STORE_PASSWORD`, `MDM_RELEASE_KEY_ALIAS`, `MDM_RELEASE_KEY_PASSWORD`);

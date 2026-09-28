@@ -41,9 +41,6 @@ initialization.completion.signal.file=/home/launcher/initialized.txt
 # A command for calling the aapt
 aapt.command=aapt
 
-# An URL for the file with configuration for loggers
-log4j.config=file:///log4j-hmdm.xml
-
 # The parameters specific to Device Log plugin
 plugin.devicelog.persistence.config.class=com.hmdm.plugins.devicelog.persistence.postgres.DeviceLogPostgresPersistenceConfiguration
 
@@ -67,7 +64,8 @@ smtp.username=myacct@example.com
 smtp.password=skcbh252235as
 smtp.from=noreply@example.com
 
-# JWT Config secret and token validity
-jwt.secretkey=20c68f0d9185b1d18cf6add1e8b491fd89529a44
+# JWT Config secret and token validity. jwt.secretkey: leave empty (a random key at every start) or set a secret of
+# your own — hex, a multiple of 4 characters, at least 128: openssl rand -hex 64. Never use a published example value.
+jwt.secretkey=
 jwt.validity=86400
 jwt.validityrememberme=2592000

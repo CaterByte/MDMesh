@@ -35,19 +35,20 @@ You only need the toolchain for the plane you're touching.
 ```bash
 cd web
 npm install
-npm run dev          # Vite dev server (proxies the API; point VITE_API_BASE at a running server)
+npm run dev          # Vite dev server on :5173, proxied to the dev stack (VITE_DEV_PROXY_TARGET to change)
 npm run build        # production build
-npx tsc --noEmit     # type-check
+npx tsc -b --noEmit  # type-check (-b: tsconfig.json only references the real projects)
 ```
 
 ### Server (`common/`, `server/`)
 Requires **JDK 17** and Maven.
 ```bash
+cp -n server/build.properties.example server/build.properties   # once: the server build reads it
 mvn -pl common test          # fast, DB-free unit + contract tests
 mvn -pl server -am compile   # type-check the server + its modules
 mvn -pl server -am package -DskipTests   # build the WAR (full build)
 ```
-The full server run needs PostgreSQL — easiest is the Docker stack below.
+The full server run needs PostgreSQL: use the dev stack below.
 
 ### Agent (`agent-android/`)
 Requires **JDK 17** + the **Android SDK** (set `ANDROID_SDK_ROOT`). A `local.properties` with `sdk.dir`
@@ -57,6 +58,7 @@ cd agent-android
 ./gradlew :proto:test :core:test          # unit tests
 ./gradlew :app:compileDebugKotlin          # type-check the app + its modules
 ./gradlew :app:assembleDebug               # build a debug APK
+./gradlew detekt                           # static analysis (baseline: config/detekt/baseline.xml)
 ```
 Install on an emulator and promote to Device Owner for testing:
 `adb install app-debug.apk && adb shell dpm set-device-owner com.mdmesh.agent.debug/com.mdmesh.agent.admin.AdminReceiver`
@@ -71,9 +73,12 @@ cd .. && docker build -f docker/supervisor.Dockerfile -t mdmesh-supervisor:dev .
 
 ### The whole stack, locally
 ```bash
-./setup.sh           # Docker Compose: Postgres + server + Caddy + supervisor (+ optional tunnel)
+docker compose --env-file docker/dev.env up -d --build   # Postgres + server + Caddy/console + supervisor, loopback only
+scripts/dev-seed.sh                                       # first run: seed the DB; console http://localhost:8088, admin / admin
+scripts/agent-v1-e2e.sh http://localhost:8080             # the Agent v1 end-to-end suite against it
 ```
-See **[DEPLOY.md](DEPLOY.md)** for hosting modes, the update pipeline, and recovery.
+Ports, the fast Java loop, the debugger and reset are in **[docs/DEV.md](docs/DEV.md)**. `./setup.sh` is the
+production installer (it writes a `.env` for a real host); see **[DEPLOY.md](DEPLOY.md)**.
 
 ---
 
@@ -85,6 +90,16 @@ See **[DEPLOY.md](DEPLOY.md)** for hosting modes, the update pipeline, and recov
 4. **Update docs** when you change behavior, config, or the API.
 5. **Open a PR** against `main` using the [PR template](.github/pull_request_template.md).
 
+### CI
+Every PR and every push to `main` runs two tiers; each skips the parts your change can't affect.
+- **T0** (`.github/workflows/t0-fast.yml`): builds each plane you touched and runs its DB-free tests, plus the
+  supervisor image smoke test and the edge (Caddy + compose) check. The agent step also runs detekt: new Kotlin
+  must be clean; pre-existing findings are listed in `agent-android/config/detekt/baseline.xml`.
+- **T1** (`.github/workflows/t1-e2e.yml`): the Agent v1 end-to-end suite against a real server and Postgres. It
+  runs the loop from [docs/DEV.md](docs/DEV.md) (the dev stack, `scripts/dev-seed.sh`, `scripts/agent-v1-e2e.sh`)
+  on its own compose project, image tag and ephemeral ports. It runs when a change touches the server, `proto/`,
+  `install/`, the server image, the dev stack or the suite. A red T1 on `main` opens a tracking issue.
+
 ### Commit messages
 Short, imperative, prefixed: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`. Explain the
 *why* in the body when it isn't obvious.
@@ -94,6 +109,38 @@ The `/agent/v1` REST contract must stay backward-compatible so older agents keep
 updates: **new request fields are optional + defaulted; never remove, rename, or repurpose a field, and
 never add a required request field.** A genuine break means a new `/agent/v2` (v1 stays). This is
 enforced by a golden contract test in CI — see [ADR-0009](docs/adr/0009-agent-v1-contract-stability.md).
+
+---
+
+## Dependency updates
+
+Every Monday Dependabot opens grouped PRs from [`.github/dependabot.yml`](.github/dependabot.yml): one each for
+server Maven, web npm, GitHub Actions, Dockerfile base images and compose images, and two for the agent's Gradle
+deps (`agent-toolchain`, `agent-libs`).
+
+- **T0 green is necessary, not sufficient.** T0 compiles and runs the DB-free tests only. Before merging a group
+  that moves a runtime library across a minor/major, run that plane's runtime check too: web —
+  `cd web && npm run build && cd ../scripts/shots && npm install && npx playwright install chromium && node capture.mjs --check`
+  (`playwright install` fetches the browser the check drives; a no-op once it is there); server — the `t1-e2e`
+  workflow (`agent-e2e` job) must be green on the PR (it builds the server image and runs the suite); agent —
+  install the APK on a device/emulator and complete a check-in.
+- **Known-bad lines are ignored, with a reason.** Each `ignore` in `dependabot.yml` names the migration that lifts
+  it (javax → jakarta / Tomcat 10+, jjwt API port, Postgres major, …). Remove the ignore in that migration's PR —
+  never merge a Dependabot PR that crosses one piecemeal. AGP 9 is not ignored: it and everything coupled to it
+  (Gradle 9, Kotlin, KSP, Hilt, detekt, …) arrive together in the `agent-toolchain` group, which is expected to
+  stay red until the AGP 9 migration and is never merged piecemeal.
+- **Licenses:** a bump that changes a dependency's license (e.g. Liquibase 5 → FSL) is blocked until reviewed
+  against [ADR-0008](docs/adr/0008-licensing-and-rebrand.md).
+- **One JDK, one Node line.** The server builds and runs on **JDK 17** (CI, Docker build + `tomcat:9.0-jdk17`
+  runtime, native installer). Node is the current **LTS** line — today **24**. The supervisor image
+  (`docker/supervisor.Dockerfile`) is on it; the web build image (`docker/web.Dockerfile`, 22) and `@types/node`
+  (20) are not yet, and `web/package.json` has no `engines` pin yet, so CI builds the web with the runner's
+  default Node. They move to 24 in one PR that also adds `engines`. After that, all of them move together once
+  the next even line has been LTS for a few months. Docker base images use floating tags, so rebuilds pick up
+  patches; a tag change is a deliberate PR. The exception is the edge's `caddy` image (`docker/web.Dockerfile`),
+  pinned to an exact release so how the Caddyfile parses changes only through a Dependabot PR that T0's `edge`
+  check has validated.
+- **Vendored CI actions** (`.github/actions/ci-kit/`) change only by re-running ci-kit's `scripts/vendor.sh`.
 
 ---
 

@@ -10,6 +10,8 @@
 #                              # new DB_PASSWORD locks the server out of its own data. Run
 #                              # `docker compose down -v` first if you really want a clean slate.
 #        ./setup.sh --native   # hand off to the native (non-Docker) installer
+#        ./setup.sh --allow-downgrade  # registry IMAGE_OWNER only: build and run a checkout older than the running
+#                              # release, or one with no readable release tag (both refused by default)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -30,18 +32,25 @@ setenv() {
   if grep -q "^$1=" .env 2>/dev/null; then sed -i "s#^$1=.*#$1=$2#" .env; else printf '%s=%s\n' "$1" "$2" >> .env; fi
 }
 
-RESET=0
+RESET=0; ALLOW_DOWNGRADE=0
 NATIVE=0; NATIVE_ARGS=()
 for a in "$@"; do
   case "$a" in
     --native) NATIVE=1 ;;
     --reset)  RESET=1 ;;
+    --allow-downgrade) ALLOW_DOWNGRADE=1 ;;   # Docker path only: the native installer has no apply to protect
     *)        NATIVE_ARGS+=("$a") ;;   # forwarded to the native installer (-y, -v)
   esac
 done
 # Hand off to the native (non-Docker) installer, passing the remaining flags through so
 # `./setup.sh --native -y` really is unattended.
 if [ "$NATIVE" = 1 ]; then exec ./install/install-native.sh "${NATIVE_ARGS[@]}"; fi
+# Docker mode takes no other flag: a typo (--alow-downgrade) must not be silently ignored.
+if [ "${#NATIVE_ARGS[@]}" -gt 0 ]; then
+  err "Unknown option: ${NATIVE_ARGS[0]}"
+  sed -n '/^# Usage:/,/^set -euo pipefail/p' "$(basename "$0")" | sed '$d; s/^# \{0,1\}//' >&2
+  exit 2
+fi
 
 command -v docker >/dev/null || { err "Docker is required (or run ./setup.sh --native)."; exit 1; }
 if ! docker compose version >/dev/null 2>&1; then
@@ -64,6 +73,29 @@ echo
 # every run then refreshes CURRENT_VERSION from it below.
 REPO_VERSION=$(mdm_repo_version .)
 
+# What this run builds is what it reports (see "The running version" below), so on a registry owner, where apply.sh may
+# have moved the stack to a newer release than this checkout, refuse to build unless --allow-downgrade:
+# - a checkout older than the running release <running> (the .env CURRENT_VERSION, or SERVER_VERSION for an older .env
+#   without it; apply.sh writes both; empty on a fresh .env) would roll the code back;
+# - a checkout with no readable release tag (source tarball, no git, tags not fetched, or a nearest tag that is not
+#   release-shaped, such as v0.3.1+build.5; see mdm_repo_version) is code of unknown version that would run under
+#   apply's release tags.
+# Called before anything is prompted for or written: right after an existing .env is read, or before a fresh one is
+# asked for. Also derives APPLY_SUPPORTED from IMAGE_OWNER (persisted below).
+version_preflight() {  # version_preflight <running>
+  if [ "${IMAGE_OWNER:-local}" = "local" ]; then APPLY_SUPPORTED=0; else APPLY_SUPPORTED=1; fi
+  [ "$APPLY_SUPPORTED" = 1 ] && [ "$ALLOW_DOWNGRADE" != 1 ] || return 0
+  if [ -z "$REPO_VERSION" ]; then
+    err "Refusing to build: IMAGE_OWNER=${IMAGE_OWNER} gets its updates from apply, and setup.sh can't tell which version this checkout is (no readable release tag vX.Y.Z or vX.Y.Z-pre) — build from a tagged git checkout, or re-run with --allow-downgrade to build it anyway."
+    exit 1
+  fi
+  if mdm_version_gt "$1" "$REPO_VERSION"; then
+    err "Refusing to build older code over this stack: running $1, checkout is ${REPO_VERSION} — git pull first, or re-run with --allow-downgrade."
+    err "(--allow-downgrade builds and runs this checkout's code against the current database.)"
+    exit 1
+  fi
+}
+
 if [ -f .env ] && [ "$RESET" != 1 ]; then
   # RE-RUN: reuse the existing .env verbatim — never regenerate secrets over a live deployment.
   # The pgdata volume keeps the ORIGINAL DB password (Postgres only reads POSTGRES_PASSWORD on
@@ -71,6 +103,7 @@ if [ -f .env ] && [ "$RESET" != 1 ]; then
   # invalidate every enrolled device's token. --reset opts out (see the header for when that's safe).
   say "Existing .env found — reusing it (secrets + hosting mode kept; use --reset to start over)."
   set -a; . ./.env; set +a
+  version_preflight "${CURRENT_VERSION:-${SERVER_VERSION:-}}"
   HOST=${BASE_URL#*://}; HOST=${HOST%%/*}
   if [ "${COMPOSE_PROFILES:-}" = "cloudflare" ]; then
     MODE=1
@@ -86,6 +119,7 @@ else
     warn "--reset: regenerating .env. If the old database still exists it needs the OLD password —"
     warn "run 'docker compose down -v' first for a genuinely clean slate."
   fi
+  version_preflight ""
   echo "Hosting mode:"
   echo "  1) Cloudflare Tunnel   (no open ports; Cloudflare manages TLS — needs a domain in Cloudflare)"
   echo "  2) Your own domain     (open 80/443; Caddy auto-provisions a Let's Encrypt cert)"
@@ -164,24 +198,41 @@ if [ -z "${GITHUB_REPO:-}" ]; then
 fi
 
 # Source builds (IMAGE_OWNER=local) cannot be updated by pulling images — keep the supervisor's one-click apply off
-# (updates = git pull && ./setup.sh). A registry owner (IMAGE_OWNER=<ghcr owner>) keeps it on. IMAGE_OWNER is the value
-# compose sees: the sourced .env on a re-run (quotes stripped, key missing → unset) or the caller's env on a fresh .env
-# (which the heredoc above wrote as ${IMAGE_OWNER:-local}) — same `:-local` default as docker-compose.yml.
+# (updates = git pull && ./setup.sh). A registry owner (IMAGE_OWNER=<ghcr owner>) keeps it on. version_preflight above
+# derived APPLY_SUPPORTED from the IMAGE_OWNER compose sees: the sourced .env on a re-run (quotes stripped, key missing →
+# unset) or the caller's env on a fresh .env (which the heredoc above wrote as ${IMAGE_OWNER:-local}) — same `:-local`
+# default as docker-compose.yml.
 # Persist AND export: a re-run has already exported the OLD .env value (set -a above), and compose gives the shell
 # environment priority over .env, so `up` below would otherwise recreate the supervisor with the stale setting.
-if [ "${IMAGE_OWNER:-local}" = "local" ]; then APPLY_SUPPORTED=0; else APPLY_SUPPORTED=1; fi
 setenv APPLY_SUPPORTED "$APPLY_SUPPORTED"
 export APPLY_SUPPORTED
 
-# The running version, refreshed on EVERY run (this run rebuilds from the checkout): the checkout's latest release tag,
-# the same rule as the native installer (install/lib/version.sh). The supervisor compares it with GitHub's latest release,
-# so a stale or placeholder 0.0.0 shows a false "Update available". No tag to read (no git, no tags fetched) → keep the
-# .env value (0.0.0 on a fresh .env). Persisted + exported for the same reason as APPLY_SUPPORTED.
+# The running version. What this run builds is what it reports: `up --build` below rebuilds every image from the
+# checkout, so CURRENT_VERSION (which the supervisor compares with GitHub's latest release; a stale or placeholder 0.0.0
+# shows a false "Update available") and the image tags SERVER/WEB/SUPERVISOR_VERSION (compose tags each `build:` result
+# with them) all follow the checkout's latest release tag (install/lib/version.sh, the native installer's rule) on EVERY
+# run, whoever owns the images. Without this a `git pull && ./setup.sh` builds new code into images named after an
+# older version, and on a registry owner a re-run would build old code under apply.sh's newer release tag.
+# version_preflight (above) has already refused an older checkout, or an untagged one, on a registry owner unless
+# --allow-downgrade.
+# No release tag to read (no git, no tags fetched, or the nearest tag is not release-shaped) → keep the .env values and
+# warn (CURRENT_VERSION falls back to a release-shaped SERVER_VERSION, else 0.0.0); on a registry owner this is only
+# reached with --allow-downgrade.
+# Persisted + exported for the same reason as APPLY_SUPPORTED.
 if [ -n "$REPO_VERSION" ]; then
   CURRENT_VERSION=$REPO_VERSION
+  SERVER_VERSION=$REPO_VERSION; WEB_VERSION=$REPO_VERSION; SUPERVISOR_VERSION=$REPO_VERSION
+  setenv SERVER_VERSION "$SERVER_VERSION"; setenv WEB_VERSION "$WEB_VERSION"; setenv SUPERVISOR_VERSION "$SUPERVISOR_VERSION"
+  export SERVER_VERSION WEB_VERSION SUPERVISOR_VERSION
 else
-  CURRENT_VERSION=${CURRENT_VERSION:-0.0.0}
-  warn "Could not read a release tag from this checkout (git missing, or tags not fetched) — keeping CURRENT_VERSION=${CURRENT_VERSION}."
+  if [ -z "${CURRENT_VERSION:-}" ]; then
+    if [ -n "$(mdm_version_core "${SERVER_VERSION:-}")" ]; then CURRENT_VERSION=$SERVER_VERSION; else CURRENT_VERSION=0.0.0; fi
+  fi
+  if [ "$APPLY_SUPPORTED" = 1 ]; then
+    warn "--allow-downgrade: no release tag readable in this checkout — building this checkout's code under the kept tag ${CURRENT_VERSION} (SERVER_VERSION=${SERVER_VERSION:-latest})."
+  else
+    warn "Could not read a release tag from this checkout (git missing, tags not fetched, or the nearest tag is not a release version vX.Y.Z[-pre]) — keeping CURRENT_VERSION=${CURRENT_VERSION}."
+  fi
 fi
 setenv CURRENT_VERSION "$CURRENT_VERSION"
 export CURRENT_VERSION
@@ -196,19 +247,24 @@ say "Checking GitHub Releases for the signed agent APK…"
 # or no python3/curl on the host → warn and keep the SPA's debug defaults, exactly like native.
 VITE_AGENT_PACKAGE=""; VITE_AGENT_CHECKSUM=""; VITE_AGENT_APK_URL=""
 if [ -n "${GITHUB_REPO:-}" ] && command -v python3 >/dev/null && command -v curl >/dev/null; then
-  AUTH=(); [ -n "${GITHUB_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+  # gh_curl ARGS...: curl, sending GITHUB_TOKEN (when set) as an Authorization header read from stdin (-H @-, curl 7.55+),
+  # never on curl's command line, which every local user can read (ps, /proc/<pid>/cmdline).
+  gh_curl() {
+    if [ -n "${GITHUB_TOKEN:-}" ]; then printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN" | curl -H @- "$@"
+    else curl "$@"; fi
+  }
   jget() { python3 -c 'import sys,json;
 d=json.load(sys.stdin)
 def asset(n): return next((a["browser_download_url"] for a in d.get("assets",[]) if a["name"]==n),"")
 print({"apk":asset("mdmesh-agent.apk"),"manifest":asset("manifest.json")}.get(sys.argv[1],""))' "$1" 2>/dev/null; }
-  REL=$(curl -fsSL "${AUTH[@]}" "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null || true)
+  REL=$(gh_curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null || true)
   APK_URL=$(printf '%s' "$REL" | jget apk); MAN_URL=$(printf '%s' "$REL" | jget manifest)
   if [ -n "$APK_URL" ] && [ -n "$MAN_URL" ]; then
-    MAN=$(curl -fsSL "${AUTH[@]}" "$MAN_URL" 2>/dev/null || true)
+    MAN=$(gh_curl -fsSL "$MAN_URL" 2>/dev/null || true)
     AGENT_CK=$(printf '%s' "$MAN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["components"]["apk"]["signatureChecksum"])' 2>/dev/null || true)
     WANT_SHA=$(printf '%s' "$MAN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["components"]["apk"]["sha256"])' 2>/dev/null || true)
     TMP_APK=$(mktemp)
-    if curl -fsSL "${AUTH[@]}" "$APK_URL" -o "$TMP_APK" 2>/dev/null && [ -n "$AGENT_CK" ] \
+    if gh_curl -fsSL "$APK_URL" -o "$TMP_APK" 2>/dev/null && [ -n "$AGENT_CK" ] \
        && [ "$(sha256sum "$TMP_APK" | awk '{print $1}')" = "$WANT_SHA" ]; then
       VITE_AGENT_PACKAGE="com.mdmesh.agent"; VITE_AGENT_CHECKSUM="$AGENT_CK"; VITE_AGENT_APK_URL="/files/agent.apk"
       say "Release APK verified (signing checksum ${AGENT_CK}) — the QR will point at /files/agent.apk."
@@ -236,8 +292,8 @@ docker compose $COMPOSE_ARGS up -d --build
 say "Waiting for the server to finish first-boot (Liquibase)…"
 BOOTED=0
 for _ in $(seq 1 60); do
-  if docker compose exec -T server test -f /opt/mdmesh/initialized.txt 2>/dev/null; then BOOTED=1; break; fi
-  sleep 5
+  sleep 5   # first: `up -d` can return before the entrypoint has removed the previous start's marker
+  if docker compose exec -T server test -s /opt/mdmesh/initialized.txt 2>/dev/null; then BOOTED=1; break; fi
 done
 if [ "$BOOTED" != 1 ]; then
   # Hard-fail rather than seed a half-migrated database: everything after this point assumes the
@@ -246,6 +302,15 @@ if [ "$BOOTED" != 1 ]; then
   docker compose logs --tail 40 server 2>&1 || true
   err "Fix the issue above and re-run ./setup.sh (it reuses your .env; no need to start over)."
   exit 1
+fi
+# The marker holds "OK" or the server's initialization error (docker/entrypoint.sh removes the previous start's marker,
+# so it is this boot's). It is read as the server's own user: the volume is that account's, and the container's root
+# would follow a link planted there.
+INIT_RESULT=$(docker compose exec -T -u mdmesh server cat /opt/mdmesh/initialized.txt 2>/dev/null || true)
+if ! grep -q '^OK' <<< "$INIT_RESULT"; then
+  err "The server reported an initialization error:"
+  printf '%s\n' "${INIT_RESULT:0:2000}" | tr -d '\000-\010\013-\037\177' | sed 's/^/    /'   # the server's text: no control chars
+  err "Fix the issue above and re-run ./setup.sh (it reuses your .env; no need to start over)."; exit 1
 fi
 
 # Data safety: hmdm_init.en.sql is FRESH-DB-ONLY — it DELETEs configurations and re-inserts demo

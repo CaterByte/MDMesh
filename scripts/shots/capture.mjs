@@ -2,6 +2,18 @@
 // fixtures (Playwright request interception), in dark mode, then round the corners (sharp).
 //
 //   node capture.mjs            # build is expected to exist at ../../web/dist
+//   node capture.mjs --check    # runtime smoke for dependency bumps instead; writes nothing
+//
+// --check visits, against the same fixtures:
+//   * signed in: /dashboard /devices /devices/101 /apps /configs /enroll /settings, plus /no-such-page
+//     (catch-all) — each must render the app shell (.shell .sidebar .wordmark) and end on the requested
+//     path (/dashboard for the catch-all);
+//   * signed out: /login — the login form must render and the page must stay on /login;
+//   * flagged first-login session (passwordReset + token in storage): /set-password — the set-password
+//     form must render and the page must stay on /set-password.
+// A route is FAIL if its selector never appears, its final path differs, or it raised any uncaught page
+// error or console.error. Prints `ok|FAIL <route> -> <final path>` per route, then `check: PASS` (exit 0)
+// or the problems on stderr (exit 1).
 //
 // Output: ../../docs/screenshots/{overview,devices,device-detail,apps,rollout}.png
 import { chromium } from 'playwright';
@@ -16,6 +28,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.resolve(__dirname, '../../web/dist');
 const OUT = path.resolve(__dirname, '../../docs/screenshots');
 const fx = buildFixtures();
+const CHECK = process.argv.includes('--check');
 
 // ---- tiny static server for the SPA (with history fallback to index.html) ----
 const MIME = {
@@ -57,25 +70,15 @@ function restData(method, p) {
   return [];                                   // unknown GET → empty list (never errors the UI)
 }
 
-async function main() {
-  if (!fs.existsSync(path.join(DIST, 'index.html'))) {
-    console.error('web/dist not found — run `npm run build` in web/ first.');
-    process.exit(1);
-  }
-  fs.mkdirSync(OUT, { recursive: true });
-  const server = serve();
-  await new Promise((r) => server.listen(0, r));
-  const base = `http://127.0.0.1:${server.address().port}`;
-
-  const browser = await chromium.launch();
+// ---- browser context: dark theme, optional stored user, API answered from fixtures ----
+async function newContext(browser, user) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
-
-  // Seed auth + dark theme before any app script runs.
+  // Seed theme (+ auth when given) before any app script runs.
   await context.addInitScript((u) => {
-    localStorage.setItem('hmdm.admin.user', JSON.stringify(u));
+    if (u) localStorage.setItem('hmdm.admin.user', JSON.stringify(u));
     localStorage.setItem('mdmesh-theme', 'dark');
     localStorage.setItem('mdmesh-density', 'comfortable');
-  }, fx.user);
+  }, user);
 
   // Answer the SPA's API calls from fixtures.
   await context.route('**/rest/**', async (route) => {
@@ -88,7 +91,75 @@ async function main() {
     const body = route.request().url().includes('/update/status') ? fx.updateStatus : { ok: true };
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
+  return context;
+}
 
+// ---- --check: runtime smoke over every route (see header) ----
+const SHELL = '.shell .sidebar .wordmark';
+const CHECK_GROUPS = [
+  {
+    user: fx.user,
+    routes: [
+      ...['/dashboard', '/devices', '/devices/101', '/apps', '/configs', '/enroll', '/settings']
+        .map((route) => ({ route, expect: route, selector: SHELL })),
+      { route: '/no-such-page', expect: '/dashboard', selector: SHELL },
+    ],
+  },
+  {
+    user: null,
+    routes: [{ route: '/login', expect: '/login', selector: '.login-card input[autocomplete="username"]' }],
+  },
+  {
+    user: { ...fx.user, passwordReset: true, passwordResetToken: 'check-token' },
+    routes: [{ route: '/set-password', expect: '/set-password', selector: '.login-card input[autocomplete="new-password"]' }],
+  },
+];
+
+async function runCheck(browser, base) {
+  const problems = [];
+  for (const group of CHECK_GROUPS) {
+    const context = await newContext(browser, group.user);
+    const page = await context.newPage();
+    page.on('pageerror', (e) => problems.push(`pageerror on ${page.url()}: ${e.message}`));
+    page.on('console', (m) => { if (m.type() === 'error') problems.push(`console.error on ${page.url()}: ${m.text()}`); });
+    for (const { route, expect, selector } of group.routes) {
+      const before = problems.length;
+      await page.goto(base + route, { waitUntil: 'domcontentloaded' });
+      const rendered = await page.waitForSelector(selector, { timeout: 10000 }).then(() => true, () => false);
+      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+      await page.waitForTimeout(800);
+      const final = new URL(page.url()).pathname;
+      if (!rendered) problems.push(`${route}: ${selector} never rendered`);
+      if (final !== expect) problems.push(`${route}: ended on ${final}, expected ${expect}`);
+      console.log(`${problems.length === before ? 'ok  ' : 'FAIL'} ${route} -> ${final}`);
+    }
+    await context.close();
+  }
+  if (problems.length) { console.error(problems.join('\n')); return false; }
+  console.log('check: PASS');
+  return true;
+}
+
+async function main() {
+  if (!fs.existsSync(path.join(DIST, 'index.html'))) {
+    console.error('web/dist not found — run `npm run build` in web/ first.');
+    process.exit(1);
+  }
+  if (!CHECK) fs.mkdirSync(OUT, { recursive: true });
+  const server = serve();
+  await new Promise((r) => server.listen(0, r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  const browser = await chromium.launch();
+
+  if (CHECK) {
+    const passed = await runCheck(browser, base);
+    await browser.close();
+    server.close();
+    process.exit(passed ? 0 : 1);
+  }
+
+  const context = await newContext(browser, fx.user);
   const page = await context.newPage();
   const shots = [
     { name: 'overview', route: '/dashboard' },

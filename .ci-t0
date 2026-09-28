@@ -1,4 +1,4 @@
 # T0 commands run locally by the ci-kit pre-push hook. SKIP_T0=1 git push to bypass.
-mvn -B -pl common test
+{ test -f server/build.properties || cp server/build.properties.example server/build.properties; } && mvn -B -pl server -am test
 npm run build --prefix web
-./agent-android/gradlew --no-daemon -p agent-android assembleDebug lintDebug testDebugUnitTest
+./agent-android/gradlew --no-daemon -p agent-android detekt assembleDebug lintDebug testDebugUnitTest
