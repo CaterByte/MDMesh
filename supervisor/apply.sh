@@ -57,17 +57,20 @@ healthy() {
 #     whatever runs next must not see a half-restored schema. caddy keeps running, so /recovery stays up;
 #  2. psql runs with ON_ERROR_STOP=1 in ONE transaction, so any error aborts it with a non-zero exit and the database
 #     is left exactly as it was (without these, psql exits 0 on SQL errors and a failed restore went unreported).
-# On failure the server is left stopped on purpose: the old version must not run on a database it was not restored
-# for. The operator retries Roll back (same backup) once the cause is fixed; DEPLOY.md has the by-hand restore.
+# The caller switches .env to the backup's versions only AFTER this succeeds, so on any failure .env still names the
+# version the database belongs to (a later `docker compose up` never pairs old images with the new database). On a
+# failed restore the server is left stopped on purpose. The operator retries Roll back (same backup) once the cause is
+# fixed; DEPLOY.md has the by-hand restore.
 restore_db() {
-  local sql="$1" log="$2"
+  local sql="$1" log="$2" running
+  running="$(grep -E '^CURRENT_VERSION=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-)"
   if ! dc stop server; then
-    errln "could not stop the server, so the database was NOT restored and nothing else was changed; .env already names the old versions. Fix the cause (see the log above), then Roll back again from /recovery."
+    errln "could not stop the server, so the database was NOT restored and nothing was changed: .env still names ${running:-the running version}, which is still running. Fix the cause (see the log above), then Roll back again from /recovery."
     return 1
   fi
   if ! dc exec -T postgres psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U "$DB_USER" -d "$DB_NAME" < "$sql" > "$log" 2>&1; then
     errln "database restore failed: $(grep -m1 -E 'ERROR|FATAL' "$log" || tail -n1 "$log")"
-    errln "the server is stopped (on purpose: the old version must not run on a database it was not restored for); the database is unchanged (the restore runs in one transaction); caddy and /recovery are up; .env names the old versions. Fix the cause (full psql output: docker compose exec supervisor cat $log), then Roll back again from /recovery; to restore by hand see DEPLOY.md (Recovery)."
+    errln "the server is stopped (on purpose: the old version must not run on a database it was not restored for); the database is unchanged (the restore runs in one transaction); .env still names ${running:-the running version}, the version this database belongs to; caddy and /recovery are up. Fix the cause (full psql output: docker compose exec supervisor cat $log), then Roll back again from /recovery; to restore by hand see DEPLOY.md (Recovery)."
     return 1
   fi
 }
@@ -85,18 +88,21 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_SQL="$BACKUP_DIR/$STAMP.sql"
 BACKUP_ENV="$BACKUP_DIR/$STAMP.env"
 
-# --- rollback [env-only]: restore previous versions; unless env-only, also stop the server, restore the DB, start
-# the old server and re-health-check. env-only is for a failed pull: no container changed yet, so there is nothing
+# --- rollback [env-only]: stop the server, restore the DB, then point .env back at the previous versions, start the
+# old server and re-health-check. env-only just resets .env. env-only is for a failed pull: no container changed yet, so there is nothing
 # to undo but .env (no downtime, and no writes since the backup are discarded). ---
-rollback() {
-  phase rollback
+restore_env() {
   set_env SERVER_VERSION "$OLD_SERVER"
   set_env WEB_VERSION "$OLD_WEB"
   set_env CURRENT_VERSION "$OLD_CURRENT"
-  if [ "${1:-}" = env-only ]; then phase rolled_back; return; fi
+}
+rollback() {
+  phase rollback
+  if [ "${1:-}" = env-only ]; then restore_env; phase rolled_back; return; fi
   if [ -s "$BACKUP_SQL" ]; then
     restore_db "$BACKUP_SQL" "$BACKUP_DIR/$STAMP.restore.log" || { phase failed; return; }
   fi
+  restore_env   # only now: .env must keep naming the version the database belongs to until the restore succeeded
   if ! dc up -d --no-deps server caddy; then
     errln "could not start the old server (see the log above); .env names the old versions and the database is restored: run 'docker compose up -d server caddy' in the install directory, or Roll back again from /recovery."
     phase failed

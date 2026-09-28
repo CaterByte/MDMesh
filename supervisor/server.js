@@ -313,8 +313,8 @@ function startRollback() {
   apply = { phase: 'rollback', fromVersion: currentVersion, toVersion: null, trigger: 'rollback', startedAt: Date.now(), finishedAt: null, error: null };
   state.apply = apply;
   spawnPhases([ROLLBACK_SCRIPT], (code) => {
-    // rollback.sh wrote the restored CURRENT_VERSION to .env (even on a failed restore, .env names the images compose
-    // will run), so `current` follows it and the update to the version just rolled away from is offered again.
+    // After a good restore rollback.sh wrote the restored CURRENT_VERSION to .env, so `current` follows it and the
+    // version just rolled away from is offered again; after a failed one .env (and so `current`) is unchanged.
     currentVersion = readCurrentVersion(currentVersion);
     if (apply.fromVersion && apply.fromVersion !== currentVersion) blockAuto(apply.fromVersion);
     apply = { ...apply, phase: code === 0 ? 'rolled_back' : 'failed', toVersion: currentVersion, finishedAt: Date.now() };

@@ -43,17 +43,20 @@ healthy() {
 #     whatever runs next must not see a half-restored schema. caddy keeps running, so /recovery stays up;
 #  2. psql runs with ON_ERROR_STOP=1 in ONE transaction, so any error aborts it with a non-zero exit and the database
 #     is left exactly as it was (without these, psql exits 0 on SQL errors and a failed restore went unreported).
-# On failure the server is left stopped on purpose: the old version must not run on a database it was not restored
-# for. The operator retries Roll back (same backup) once the cause is fixed; DEPLOY.md has the by-hand restore.
+# The caller switches .env to the backup's versions only AFTER this succeeds, so on any failure .env still names the
+# version the database belongs to (a later `docker compose up` never pairs old images with the new database). On a
+# failed restore the server is left stopped on purpose. The operator retries Roll back (same backup) once the cause is
+# fixed; DEPLOY.md has the by-hand restore.
 restore_db() {
-  local sql="$1" log="$2"
+  local sql="$1" log="$2" running
+  running="$(grep -E '^CURRENT_VERSION=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-)"
   if ! dc stop server; then
-    errln "could not stop the server, so the database was NOT restored and nothing else was changed; .env already names the old versions. Fix the cause (see the log above), then Roll back again from /recovery."
+    errln "could not stop the server, so the database was NOT restored and nothing was changed: .env still names ${running:-the running version}, which is still running. Fix the cause (see the log above), then Roll back again from /recovery."
     return 1
   fi
   if ! dc exec -T postgres psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U "$DB_USER" -d "$DB_NAME" < "$sql" > "$log" 2>&1; then
     errln "database restore failed: $(grep -m1 -E 'ERROR|FATAL' "$log" || tail -n1 "$log")"
-    errln "the server is stopped (on purpose: the old version must not run on a database it was not restored for); the database is unchanged (the restore runs in one transaction); caddy and /recovery are up; .env names the old versions. Fix the cause (full psql output: docker compose exec supervisor cat $log), then Roll back again from /recovery; to restore by hand see DEPLOY.md (Recovery)."
+    errln "the server is stopped (on purpose: the old version must not run on a database it was not restored for); the database is unchanged (the restore runs in one transaction); .env still names ${running:-the running version}, the version this database belongs to; caddy and /recovery are up. Fix the cause (full psql output: docker compose exec supervisor cat $log), then Roll back again from /recovery; to restore by hand see DEPLOY.md (Recovery)."
     return 1
   fi
 }
@@ -65,26 +68,28 @@ if [ -z "$STAMP" ]; then errln "no backup recorded to roll back to"; phase faile
 ENV_SNAP="$BACKUP_DIR/$STAMP.env"
 SQL_SNAP="$BACKUP_DIR/$STAMP.sql"
 
-# Restore the previous image versions.
+# The previous image versions, from the snapshot. Written to .env only after the database restore succeeded.
+OLD_SERVER="" OLD_WEB="" OLD_CURRENT=""
 if [ -f "$ENV_SNAP" ]; then
   OLD_SERVER="$(grep -E '^SERVER_VERSION=' "$ENV_SNAP" | head -1 | cut -d= -f2-)"
   OLD_WEB="$(grep -E '^WEB_VERSION=' "$ENV_SNAP" | head -1 | cut -d= -f2-)"
   # Snapshots from before CURRENT_VERSION was recorded fall back to the server tag, as they always did.
   OLD_CURRENT="$(grep -E '^CURRENT_VERSION=' "$ENV_SNAP" | head -1 | cut -d= -f2-)"
   [ -n "$OLD_CURRENT" ] || OLD_CURRENT="$OLD_SERVER"
-  [ -n "$OLD_SERVER" ] && set_env SERVER_VERSION "$OLD_SERVER"
-  [ -n "$OLD_CURRENT" ] && set_env CURRENT_VERSION "$OLD_CURRENT"
-  [ -n "$OLD_WEB" ] && set_env WEB_VERSION "$OLD_WEB"
 else
   errln "version snapshot $ENV_SNAP missing — recreating current images"
 fi
 
-# Restore the database dump with the server stopped, then start the old server on it.
+# Restore the database dump with the server stopped; .env keeps naming the running version until that succeeded.
 if [ -s "$SQL_SNAP" ]; then
   restore_db "$SQL_SNAP" "$BACKUP_DIR/$STAMP.restore.log" || { phase failed; exit 1; }
 else
   errln "db dump $SQL_SNAP missing/empty — restored versions only"
 fi
+
+[ -n "$OLD_SERVER" ] && set_env SERVER_VERSION "$OLD_SERVER"
+[ -n "$OLD_CURRENT" ] && set_env CURRENT_VERSION "$OLD_CURRENT"
+[ -n "$OLD_WEB" ] && set_env WEB_VERSION "$OLD_WEB"
 
 if ! dc up -d --no-deps server caddy; then
   errln "could not start the old server (see the log above); .env names the old versions and the database is restored: run 'docker compose up -d server caddy' in the install directory, or Roll back again."

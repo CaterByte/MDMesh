@@ -961,3 +961,42 @@ t.test('after an apply, status shows the new current even when the next poll fai
     a.equal(again.status, 400, 'a second Update of the running version is refused');
     a.deepEqual(fs.readdirSync(d.backups).sort(), backups, 'no second backup overwrote /backups/latest');
   });
+
+// --- M9: .env switches to the backup's versions only after a good restore. Until then it keeps naming the version that
+// is running (or was, if the server was stopped), which is the one the database belongs to: a later `docker compose up`
+// must never pair the old images with the new version's database. ---
+t.test('rollback.sh: when the stop or the restore fails, .env still names the running version, and success switches it', () => {
+  const fs = require('fs');
+  for (const knob of [{ STUB_FAIL_RE: '^compose stop server$' }, { STUB_PSQL_FAIL: '1' }]) {
+    const d = rollbackDeploy();
+    try {
+      const r = runScript('rollback.sh', [], { ...d.env, ...knob });
+      a.notEqual(r.code, 0, r.all);
+      a.match(d.envFile(), /^SERVER_VERSION=0\.0\.2$/m, JSON.stringify(knob));
+      a.match(d.envFile(), /^CURRENT_VERSION=0\.0\.2$/m, JSON.stringify(knob));
+      a.match(r.err, /^ERR .*\.env still names 0\.0\.2/m, 'the ERR says which version .env names');
+    } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
+  }
+  const d = rollbackDeploy();
+  try {
+    const r = runScript('rollback.sh', [], d.env);
+    a.equal(r.code, 0, r.all);
+    a.match(d.envFile(), /^SERVER_VERSION=0\.0\.1$/m);
+  } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
+});
+
+t.test('apply.sh: if the rollback cannot stop the new server, .env names the new version that is still running', () => {
+  const fs = require('fs');
+  for (const knob of [{ STUB_FAIL_RE: '^compose stop server$' }, { STUB_PSQL_FAIL: '1' }]) {
+    const d = makeDeploy('SERVER_VERSION=0.0.1\nWEB_VERSION=0.0.1\nCURRENT_VERSION=0.0.1\n');
+    try {
+      const r = runScript('apply.sh', ['0.0.2'], { ...d.env, STUB_CURL_FAIL: '1', HEALTH_TIMEOUT: '0', ...knob });
+      a.equal(r.code, 1, r.all);
+      a.match(r.out, /PHASE failed/);
+      a.match(d.envFile(), /^SERVER_VERSION=0\.0\.2$/m, JSON.stringify(knob) + '\n' + r.all);
+      a.match(d.envFile(), /^WEB_VERSION=0\.0\.2$/m);
+      a.match(d.envFile(), /^CURRENT_VERSION=0\.0\.2$/m);
+      a.match(r.err, /^ERR .*\.env still names 0\.0\.2/m);
+    } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
+  }
+});

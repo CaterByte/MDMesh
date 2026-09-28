@@ -179,19 +179,22 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
   instead: `git pull && ./setup.sh` (Docker from source) or `git pull && sudo ./install/install-native.sh` (native).
   Native installs don't proxy it: the supervisor listens on loopback only, so open it from the host with
   `curl 127.0.0.1:9000/recovery` (not `https://<host>/recovery`).
-- **What a rollback does** (the automatic one after a failed update, and **Roll back**): it sets the image tags and
-  `CURRENT_VERSION` in `.env` back to the pre-update release, stops `server`, restores the database dump taken just
-  before the update, starts the old `server` + `caddy` and waits for health. Anything written to the database after
+- **What a rollback does** (the automatic one after a failed update, and **Roll back**): it stops `server`, restores the
+  database dump taken just before the update, then sets the image tags and `CURRENT_VERSION` in `.env` back to the
+  pre-update release, starts the old `server` + `caddy` and waits for health. Anything written to the database after
   the update is discarded. The restore runs in one transaction and stops at the first error, so a failed restore
-  changes nothing. The rollback then ends as **failed** and says why, and leaves `server` **stopped** on purpose (the
-  old version must not run on a database that wasn't restored for it). caddy and `/recovery` stay up. Fix the cause
-  (the full psql output is in the supervisor: `docker compose exec supervisor cat /backups/<stamp>.restore.log`), then
-  press **Roll back** again: it uses the same backup. To restore by hand instead, from the install directory:
+  changes nothing: the rollback then ends as **failed**, `.env` still names the version the database belongs to, and
+  `server` is left **stopped** on purpose (the old version must not run on a database that wasn't restored for it).
+  caddy and `/recovery` stay up. Fix the cause (the full psql output is in the supervisor:
+  `docker compose exec supervisor cat /backups/<stamp>.restore.log`), then press **Roll back** again: it uses the same
+  backup. To restore by hand instead, from the install directory:
   ```bash
   STAMP=$(docker compose exec -T supervisor cat /backups/latest)
+  docker compose exec -T supervisor cat "/backups/$STAMP.env"   # the pre-update versions
   docker compose stop server
   docker compose exec -T supervisor cat "/backups/$STAMP.sql" \
     | docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 --single-transaction -U mdmesh -d mdmesh
+  # only if that succeeded: copy SERVER_VERSION, WEB_VERSION and CURRENT_VERSION from the .env snapshot above into .env
   docker compose up -d --no-deps server caddy
   ```
 - **Source (build) deploys** can't auto-pull, so setup.sh hides one-click Update (`APPLY_SUPPORTED=0`); update with
