@@ -193,9 +193,17 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
   docker compose exec -T supervisor cat "/backups/$STAMP.env"   # the pre-update versions
   docker compose stop server
   docker compose exec -T supervisor cat "/backups/$STAMP.sql" \
+    | sed "1,/^SET lock_timeout = 0;\$/s/^SET lock_timeout = 0;\$/SET lock_timeout = '60s';/" \
     | docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 --single-transaction -U mdmesh -d mdmesh \
+        -c "SET lock_timeout = '60s'" \
         -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()" \
-        -f -   # ends any other session first (a leftover lock would make the restore wait forever), in the same transaction
+        -f -
+  ```
+  In one transaction this ends every other session, then restores with a 60-second lock bound: a lock nothing can end
+  (a prepared transaction) fails with "lock timeout" instead of waiting forever. The `sed` matters: the dump's own
+  header says `SET lock_timeout = 0;`, which would cancel the bound, so its first such line is rewritten (only that
+  one; a data row with the same text is left alone). Then:
+  ```bash
   # only if that succeeded: copy SERVER_VERSION, WEB_VERSION and CURRENT_VERSION from the .env snapshot above into .env
   docker compose up -d --no-deps server caddy
   ```
