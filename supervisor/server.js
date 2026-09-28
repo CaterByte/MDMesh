@@ -66,9 +66,18 @@ try {
 } catch { /* no saved state yet */ }
 // Wall-clock of the last completed poll() — used to rate-limit the on-demand /update/check route.
 let lastPollAt = 0;
+/** Persist {auto, skipVersion}: written to a temp file and renamed over AUTO_FILE (like ensureApk), so a crash mid-write
+ *  never leaves a torn file (which would silently drop the skip at the next start). */
 function saveAuto() {
-  try { fs.mkdirSync(path.dirname(AUTO_FILE), { recursive: true }); fs.writeFileSync(AUTO_FILE, JSON.stringify({ auto: autoUpdate, skipVersion })); }
-  catch (e) { console.log('[auto] persist failed:', String((e && e.message) || e)); }
+  const tmp = AUTO_FILE + '.tmp';
+  try {
+    fs.mkdirSync(path.dirname(AUTO_FILE), { recursive: true });
+    fs.writeFileSync(tmp, JSON.stringify({ auto: autoUpdate, skipVersion }));
+    fs.renameSync(tmp, AUTO_FILE);
+  } catch (e) {
+    console.log('[auto] persist failed:', String((e && e.message) || e));
+    try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ }
+  }
 }
 /** Never auto-apply `v` again (see skipVersion). Persisted at once, and shown as autoSkipped in /update/status. */
 function blockAuto(v) {

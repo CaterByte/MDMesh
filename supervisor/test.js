@@ -1055,3 +1055,23 @@ t.test('a failed restore reaches /update/status as a pointer to restore.log; the
     a.match(sup.log(), /relation "x" does not exist/, 'the psql error is in the supervisor log');
     a.equal(s.current, '0.0.2', '.env (and current) still name the version the database belongs to');
   });
+
+// --- Round 2 minors ---
+t.test('auto.json is written atomically (tmp + rename): a link at its path is replaced, never written through',
+  { timeout: 20000 }, async (tt) => {
+    const fs = require('fs'), os = require('os'), path = require('path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sup-auto-'));
+    let sup = null, authz = null;
+    tt.after(async () => { await stopChild(sup && sup.child); if (authz) await authz.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+    const outside = path.join(dir, 'outside');
+    fs.writeFileSync(outside, 'NOT AUTO STATE');
+    fs.symlinkSync(outside, path.join(dir, 'auto.json'));
+    authz = await fakeAuthz();
+    sup = await spawnSupervisor(dir, { APPLY_SUPPORTED: '1', SERVER_BASE: authz.base }, /supervisor on/);
+    const r = await fetch(`http://127.0.0.1:${sup.port}/update/auto`, { method: 'POST', headers: ADMIN, body: JSON.stringify({ auto: true }) });
+    a.equal(r.status, 200);
+    a.ok(fs.lstatSync(path.join(dir, 'auto.json')).isFile(), 'auto.json is a regular file now');
+    a.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'auto.json'), 'utf8')), { auto: true, skipVersion: null });
+    a.equal(fs.readFileSync(outside, 'utf8'), 'NOT AUTO STATE', 'the link target is untouched');
+    a.ok(!fs.existsSync(path.join(dir, 'auto.json.tmp')), 'no temp file left behind');
+  });
