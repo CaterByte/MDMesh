@@ -406,6 +406,93 @@ async function waitFor(fn, what, ms = 10000) {
   }
 }
 
+/** A --require preload that maps logical https origins (FAKE_ORIGINS: {"https://api.github.com": "http://127.0.0.1:N/api",
+ *  ...}) onto local http servers. server.js keeps seeing the real https URLs (so its https-only and api.github.com
+ *  rules apply unchanged); only the socket goes to the fake. */
+function writePreload(dir) {
+  const p = require('path').join(dir, 'fake-origins.js');
+  require('fs').writeFileSync(p, `const f = globalThis.fetch;
+const m = JSON.parse(process.env.FAKE_ORIGINS || '{}');
+globalThis.fetch = (u, o) => {
+  let s = String(u);
+  for (const [k, v] of Object.entries(m)) if (s === k || s.startsWith(k + '/')) { s = v + s.slice(k.length); break; }
+  return f(s, o);
+};
+`);
+  return p;
+}
+
+/** A fake GitHub for owner/repo o/r with one signed release `version` (throwaway minisign key → `pub`), on three
+ *  logical origins: the API (https://api.github.com), the web (https://github.com, browser_download_url) and the CDN
+ *  the asset API redirects to (https://cdn.test). opts.privateRepo: browser URLs 404 and the asset API needs
+ *  `Bearer <opts.token>` + octet-stream; opts.apk: a Buffer published as mdmesh-agent.apk; opts.failAfter: the releases
+ *  list answers 500 once it has been served that many times. The CDN refuses any request carrying Authorization. */
+async function fakeGitHub(dir, opts) {
+  const fs = require('fs'), path = require('path'), http = require('http'), crypto = require('crypto');
+  const kd = fs.mkdtempSync(path.join(dir, 'gh-'));
+  const manifest = { version: opts.version, channel: 'stable', components: {} };
+  if (opts.apk) manifest.components.apk = { file: 'mdmesh-agent.apk', versionCode: 999, sha256: crypto.createHash('sha256').update(opts.apk).digest('hex') };
+  fs.writeFileSync(path.join(kd, 'manifest.json'), JSON.stringify(manifest));
+  cp.execFileSync('minisign', ['-G', '-W', '-p', path.join(kd, 'k.pub'), '-s', path.join(kd, 'k.key')], { stdio: 'ignore' });
+  cp.execFileSync('minisign', ['-S', '-s', path.join(kd, 'k.key'), '-m', path.join(kd, 'manifest.json')], { stdio: 'ignore' });
+  const bytes = { 'manifest.json': fs.readFileSync(path.join(kd, 'manifest.json')),
+    'manifest.json.minisig': fs.readFileSync(path.join(kd, 'manifest.json.minisig')) };
+  if (opts.apk) bytes['mdmesh-agent.apk'] = opts.apk;
+  const hits = { releases: 0, api: [], web: 0, cdn: [] };
+  const tag = 'v' + opts.version;
+  const server = http.createServer((req, res) => {
+    const u = req.url;
+    const assetsPrefix = '/api/repos/o/r/releases/assets/';
+    if (u.startsWith(assetsPrefix)) {
+      const name = decodeURIComponent(u.slice(assetsPrefix.length));
+      hits.api.push({ auth: req.headers.authorization || null, accept: req.headers.accept || null });
+      if (opts.privateRepo && (req.headers.authorization !== 'Bearer ' + opts.token || req.headers.accept !== 'application/octet-stream')) {
+        res.statusCode = 404; res.end(); return;
+      }
+      res.writeHead(302, { location: `https://cdn.test/signed/${encodeURIComponent(name)}?X-Amz-Signature=abc` });
+      res.end('redirect body');
+    } else if (u.startsWith('/api/repos/o/r/releases')) {
+      hits.releases++;
+      if (opts.failAfter != null && hits.releases > opts.failAfter) { res.statusCode = 500; res.end(); return; }
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify([{ tag_name: tag, html_url: 'https://github.com/o/r/releases/tag/' + tag, assets: Object.keys(bytes)
+        .map((name) => ({ name, url: 'https://api.github.com/repos/o/r/releases/assets/' + encodeURIComponent(name),
+          browser_download_url: `https://github.com/o/r/releases/download/${tag}/${name}` })) }]));
+    } else if (u.startsWith(`/web/o/r/releases/download/${tag}/`)) {
+      hits.web++;
+      const name = decodeURIComponent(u.split('/').pop());
+      if (opts.privateRepo || !bytes[name]) { res.statusCode = 404; res.end(); return; }
+      res.end(bytes[name]);
+    } else if (u.startsWith('/cdn/signed/')) {
+      hits.cdn.push({ auth: req.headers.authorization || null });
+      if (req.headers.authorization) { res.statusCode = 400; res.end('auth header forwarded'); return; }
+      const name = decodeURIComponent(u.slice('/cdn/signed/'.length).replace(/\?.*$/, ''));
+      if (bytes[name]) res.end(bytes[name]); else { res.statusCode = 404; res.end(); }
+    } else { res.statusCode = 404; res.end(); }
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  return {
+    hits, pub: path.join(kd, 'k.pub'), preload: writePreload(dir),
+    env: { GITHUB_REPO: 'o/r', MANIFEST_PUBKEY: path.join(kd, 'k.pub'),
+      FAKE_ORIGINS: JSON.stringify({ 'https://api.github.com': base + '/api', 'https://github.com': base + '/web', 'https://cdn.test': base + '/cdn' }) },
+    close: async () => { server.closeAllConnections(); await new Promise((r) => server.close(r)); },
+  };
+}
+
+/** A fake Headwind server for authorizeApply: any request with a JSESSIONID cookie is an admin. */
+async function fakeAuthz() {
+  const http = require('http');
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify(/JSESSIONID=/.test(req.headers.cookie || '') ? { status: 'OK', data: [] } : { status: 'ERROR' }));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  return { base: `http://127.0.0.1:${server.address().port}`,
+    close: async () => { server.closeAllConnections(); await new Promise((r) => server.close(r)); } };
+}
+const ADMIN = { 'X-MDMesh-Console': '1', Cookie: 'JSESSIONID=abc', 'content-type': 'application/json' };
+
 t.test('private repo: with GITHUB_TOKEN the manifest, signature and APK come through the asset API URL, and the token '
   + 'never reaches the CDN it redirects to', { skip: !HAS_MINISIGN && 'minisign not installed', timeout: 20000 }, async (tt) => {
   const fs = require('fs'), os = require('os'), path = require('path'), http = require('http'), crypto = require('crypto');
@@ -683,6 +770,8 @@ t.test('with AUTO_UPDATE on, a rollback is not undone by auto-applying the relea
     a.equal(after.apply.phase, 'rolled_back');
     a.equal(after.current, '0.0.1');
     a.equal(after.updateAvailable, true, '0.0.2 is still offered for a manual Update');
+    a.equal(after.autoSkipped, '0.0.2');
+    a.equal(JSON.parse(fs.readFileSync(path.join(d.dir, 'auto.json'), 'utf8')).skipVersion, '0.0.2', 'the skip survives a restart');
     a.ok(!d.calls().some((c) => c.includes('pg_dump')), 'apply.sh never ran');
   });
 
@@ -811,3 +900,78 @@ t.test('apply.sh: a failed pull changed no container, so it resets .env only: no
     a.match(d.envFile(), /^CURRENT_VERSION=0\.0\.1$/m);
   } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
 });
+
+// --- B1: the auto-apply skip is persisted in auto.json {auto, skipVersion}, set by ANY failed apply and by a rollback,
+// exact-match only (a newer release still auto-applies), and shown as autoSkipped in /update/status. ---
+t.test('auto.json {auto:true, skipVersion} blocks exactly that release across a restart; a newer one still auto-applies',
+  { skip: !HAS_MINISIGN && 'minisign not installed', timeout: 40000 }, async (tt) => {
+    const fs = require('fs'), path = require('path');
+    const d = makeDeploy('SERVER_VERSION=0.0.1\nWEB_VERSION=0.0.1\nCURRENT_VERSION=0.0.1\n');
+    fs.writeFileSync(path.join(d.dir, 'auto.json'), JSON.stringify({ auto: true, skipVersion: '0.0.2' }));
+    let gh = null, sup = null;
+    tt.after(async () => { await stopChild(sup && sup.child); if (gh) await gh.close(); fs.rmSync(d.dir, { recursive: true, force: true }); });
+    const status = async () => (await fetch(`http://127.0.0.1:${sup.port}/update/status`)).json();
+
+    gh = await fakeGitHub(d.dir, { version: '0.0.2' });
+    sup = await spawnSupervisor(d.dir, { ...d.env, ...gh.env, APPLY_SUPPORTED: '1', AUTO_UPDATE: '1', SERVER_BASE: 'http://127.0.0.1:9' },
+      /supervisor on/, ['--require', gh.preload]);
+    // setStatus (which is where an auto-apply starts, synchronously) stamps checkedAt: once it is set, the decision is made.
+    const s = await waitFor(async () => { const x = await status(); return x.checkedAt && x; }, 'the startup poll');
+    a.equal(s.verified, true, sup.log());
+    a.equal(s.updateAvailable, true);
+    a.equal(s.apply, null, 'the skipped release was not auto-applied:\n' + sup.log());
+    a.equal(s.autoSkipped, '0.0.2');
+    a.equal(s.auto, true);
+    a.deepEqual(d.calls(), [], 'apply.sh never ran');
+    await stopChild(sup.child);
+    await gh.close();
+
+    gh = await fakeGitHub(d.dir, { version: '0.0.3' });
+    sup = await spawnSupervisor(d.dir, { ...d.env, ...gh.env, APPLY_SUPPORTED: '1', AUTO_UPDATE: '1', SERVER_BASE: 'http://127.0.0.1:9' },
+      /supervisor on/, ['--require', gh.preload]);
+    const s3 = await waitFor(async () => { const x = await status(); return x.apply && isTerminal(x.apply.phase) && x; }, 'the auto-apply of 0.0.3', 20000);
+    a.equal(s3.apply.trigger, 'auto');
+    a.equal(s3.apply.toVersion, '0.0.3');
+    a.equal(s3.apply.phase, 'done', sup.log());
+  });
+
+t.test('a failed MANUAL apply also blocks auto-apply of that release, persisted in auto.json and shown in /update/status',
+  { skip: !HAS_MINISIGN && 'minisign not installed', timeout: 40000 }, async (tt) => {
+    const fs = require('fs'), path = require('path');
+    const d = makeDeploy('SERVER_VERSION=0.0.1\nWEB_VERSION=0.0.1\nCURRENT_VERSION=0.0.1\n');
+    let gh = null, sup = null, authz = null;
+    tt.after(async () => {
+      await stopChild(sup && sup.child); if (gh) await gh.close(); if (authz) await authz.close();
+      fs.rmSync(d.dir, { recursive: true, force: true });
+    });
+    gh = await fakeGitHub(d.dir, { version: '0.0.2' });
+    authz = await fakeAuthz();
+    const env = { ...d.env, ...gh.env, APPLY_SUPPORTED: '1', AUTO_UPDATE: '0', SERVER_BASE: authz.base, STUB_FAIL_RE: '^compose pull ' };
+    sup = await spawnSupervisor(d.dir, env, /supervisor on/, ['--require', gh.preload]);
+    const status = async () => (await fetch(`http://127.0.0.1:${sup.port}/update/status`)).json();
+    await waitFor(async () => (await status()).verified, 'the startup poll');
+
+    const r = await fetch(`http://127.0.0.1:${sup.port}/update/apply`, { method: 'POST', headers: ADMIN });
+    a.equal(r.status, 202, await r.text());
+    const s = await waitFor(async () => { const x = await status(); return x.apply && isTerminal(x.apply.phase) && x; }, 'the apply to fail', 20000);
+    a.equal(s.apply.phase, 'rolled_back', sup.log());
+    a.equal(s.autoSkipped, '0.0.2');
+    a.deepEqual(JSON.parse(fs.readFileSync(path.join(d.dir, 'auto.json'), 'utf8')), { auto: false, skipVersion: '0.0.2' });
+
+    // Turning unattended on does not retry it.
+    const t0 = (await status()).checkedAt;
+    const on = await fetch(`http://127.0.0.1:${sup.port}/update/auto`, { method: 'POST', headers: ADMIN, body: JSON.stringify({ auto: true }) });
+    a.equal(on.status, 200);
+    a.equal((await status()).apply.trigger, 'manual', 'turning auto on did not start an apply:\n' + sup.log());
+    a.deepEqual(JSON.parse(fs.readFileSync(path.join(d.dir, 'auto.json'), 'utf8')), { auto: true, skipVersion: '0.0.2' });
+    a.ok(t0);
+
+    // Nor does a restart (the skip is on disk, not in memory).
+    await stopChild(sup.child);
+    sup = await spawnSupervisor(d.dir, env, /supervisor on/, ['--require', gh.preload]);
+    const s2 = await waitFor(async () => { const x = await status(); return x.checkedAt && x; }, 'the startup poll after restart');
+    a.equal(s2.auto, true);
+    a.equal(s2.updateAvailable, true);
+    a.equal(s2.apply, null, 'no auto-apply after the restart:\n' + sup.log());
+    a.equal(s2.autoSkipped, '0.0.2');
+  });

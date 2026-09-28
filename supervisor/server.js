@@ -51,23 +51,35 @@ let lastRelease = null;
 // In-flight apply state surfaced via /update/status; null when no apply has run.
 let apply = null;
 
-// Unattended ("auto-update") toggle, persisted on the backups volume so it survives a recreate.
-// Seeded from AUTO_UPDATE, then overridden by the saved file if present.
+// Unattended ("auto-update") state, persisted on the backups volume as {auto, skipVersion} so it survives a restart
+// or recreate. `auto` is seeded from AUTO_UPDATE, then overridden by the saved file if present. `skipVersion` is the
+// release unattended mode must not apply: one whose apply failed (manual or automatic; prevents a rollback crash-loop)
+// or one an operator rolled back from (auto-applying it would undo the rollback on the next poll). It is an exact
+// match: a newer release still auto-applies, and a manual Update still applies the skipped one.
 const AUTO_FILE = process.env.AUTO_FILE || '/backups/auto.json';
 let autoUpdate = process.env.AUTO_UPDATE === '1' || process.env.AUTO_UPDATE === 'true';
-try { const j = JSON.parse(fs.readFileSync(AUTO_FILE, 'utf8')); if (typeof j.auto === 'boolean') autoUpdate = j.auto; } catch { /* no saved pref yet */ }
-// Version unattended mode must not apply again: one whose auto-apply already failed (prevents a rollback crash-loop),
-// or one an operator rolled back from (auto-applying it would undo the rollback on the very next poll). A manual
-// Update still offers and applies it.
-let lastAutoFailed = null;
+let skipVersion = null;
+try {
+  const j = JSON.parse(fs.readFileSync(AUTO_FILE, 'utf8'));
+  if (typeof j.auto === 'boolean') autoUpdate = j.auto;
+  if (typeof j.skipVersion === 'string' && j.skipVersion) skipVersion = j.skipVersion;
+} catch { /* no saved state yet */ }
 // Wall-clock of the last completed poll() — used to rate-limit the on-demand /update/check route.
 let lastPollAt = 0;
 function saveAuto() {
-  try { fs.mkdirSync(path.dirname(AUTO_FILE), { recursive: true }); fs.writeFileSync(AUTO_FILE, JSON.stringify({ auto: autoUpdate })); }
+  try { fs.mkdirSync(path.dirname(AUTO_FILE), { recursive: true }); fs.writeFileSync(AUTO_FILE, JSON.stringify({ auto: autoUpdate, skipVersion })); }
   catch (e) { console.log('[auto] persist failed:', String((e && e.message) || e)); }
 }
+/** Never auto-apply `v` again (see skipVersion). Persisted at once, and shown as autoSkipped in /update/status. */
+function blockAuto(v) {
+  if (!v || v === skipVersion) return;
+  skipVersion = v;
+  saveAuto();
+  state.autoSkipped = skipVersion;
+  console.log('[auto] will not auto-apply', v, 'again (apply failed or rolled back); Update still applies it by hand');
+}
 
-let state = { current: currentVersion, latest: null, updateAvailable: false, verified: false, checkedAt: null, error: 'not polled yet', apply: null, auto: autoUpdate, applySupported: APPLY_SUPPORTED };
+let state = { current: currentVersion, latest: null, updateAvailable: false, verified: false, checkedAt: null, error: 'not polled yet', apply: null, auto: autoUpdate, autoSkipped: skipVersion, applySupported: APPLY_SUPPORTED };
 
 async function ghJson(url) {
   const headers = { 'User-Agent': 'mdmesh-updater', Accept: 'application/vnd.github+json' };
@@ -199,6 +211,7 @@ function setStatus(args) {
     ...shapeStatus(args),
     apply,
     auto: autoUpdate,
+    autoSkipped: skipVersion,
     applySupported: APPLY_SUPPORTED,
     apk: lastApk ? { version: lastApk.version, versionCode: lastApk.versionCode, sha256: lastApk.sha256, available: apkReady() } : null,
     release: lastRelease,
@@ -212,7 +225,7 @@ function maybeAutoApply() {
   if (!autoUpdate || !state.updateAvailable) return;
   if (apply && !isTerminal(apply.phase)) return; // an apply is already running
   const { version } = imageTags(lastManifest);
-  if (version && version === lastAutoFailed) return; // already failed on this version — don't loop
+  if (version && version === skipVersion) return; // failed or rolled back from — don't loop
   console.log('[auto] verified update', version, '→ self-applying');
   startApply('auto');
 }
@@ -274,7 +287,7 @@ function startApply(trigger) {
     if (code === 0) { apply = { ...apply, phase: 'done', finishedAt: Date.now() }; }
     else if (!isTerminal(apply.phase)) { apply = { ...apply, phase: 'failed', finishedAt: Date.now() }; }
     else { apply = { ...apply, finishedAt: Date.now() }; }
-    if (code !== 0 && apply.trigger === 'auto') lastAutoFailed = toVersion; // don't auto-retry a bad version
+    if (code !== 0) blockAuto(toVersion); // never auto-retry a version that failed, however it was started
     state.apply = apply;
     poll(); // refresh latest/updateAvailable against the (possibly new) current version
   });
@@ -291,7 +304,7 @@ function startRollback() {
     // rollback.sh wrote the restored CURRENT_VERSION to .env (even on a failed restore, .env names the images compose
     // will run), so `current` follows it and the update to the version just rolled away from is offered again.
     currentVersion = readCurrentVersion(currentVersion);
-    if (apply.fromVersion && apply.fromVersion !== currentVersion) lastAutoFailed = apply.fromVersion;
+    if (apply.fromVersion && apply.fromVersion !== currentVersion) blockAuto(apply.fromVersion);
     if (!isTerminal(apply.phase)) apply = { ...apply, phase: code === 0 ? 'rolled_back' : 'failed' };
     apply = { ...apply, toVersion: currentVersion, finishedAt: Date.now() };
     state.apply = apply;

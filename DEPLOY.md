@@ -169,8 +169,9 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
 - **One-click:** when a verified update is available, a banner appears in the console; an admin clicks
   **Update**, watches the live progress, and the stack rolls back on its own if anything fails.
 - **Unattended:** turn on **Automatic updates** in Settings (or `AUTO_UPDATE=1`) to apply each verified
-  release without a prompt. A release whose auto-apply fails, or that you roll back from, is not auto-applied again
-  while the supervisor runs (**Update** still applies it by hand).
+  release without a prompt. A release whose apply fails (automatic or by hand), or that you roll back from, is never
+  auto-applied again, even after a restart: it is kept as `skipVersion` in `/backups/auto.json` and shown as
+  `autoSkipped` in `/update/status`. **Update** still applies it by hand, and a newer release auto-applies as usual.
 - **Recovery:** `https://<host>/recovery` shows live apply state and, on quick-start installs, a **Roll back**
   button. While signed in, no token is needed. If the server is down, paste the break-glass recovery token, read with:
   `docker compose exec supervisor cat /backups/recovery.token`. From-source Docker and native installs
