@@ -746,14 +746,14 @@ t.test('with AUTO_UPDATE on, a rollback is not undone by auto-applying the relea
 // old version on the un-restored database. ---
 const idx = (calls, re) => calls.findIndex((c) => re.test(c));
 const PSQL_RE = /compose exec -T postgres psql .*--single-transaction/; // the restore itself
-const TERM_RE = /compose exec -T postgres psql .*pg_terminate_backend/;   // ending the other sessions first
 
 function rollbackDeploy() {
   const fs = require('fs'), path = require('path');
   const d = makeDeploy('SERVER_VERSION=0.0.2\nWEB_VERSION=0.0.2\nCURRENT_VERSION=0.0.2\n');
   fs.writeFileSync(path.join(d.backups, 'latest'), '20260927-120000\n');
   fs.writeFileSync(path.join(d.backups, '20260927-120000.env'), 'SERVER_VERSION=0.0.1\nWEB_VERSION=0.0.1\nCURRENT_VERSION=0.0.1\n');
-  fs.writeFileSync(path.join(d.backups, '20260927-120000.sql'), '-- dump\nSELECT 1;\n');
+  // Like a real pg_dump: its preamble resets lock_timeout to 0 (which would undo a bound set before it).
+  fs.writeFileSync(path.join(d.backups, '20260927-120000.sql'), '-- dump\nSET lock_timeout = 0;\nSELECT 1;\n');
   return d;
 }
 
@@ -761,9 +761,10 @@ function assertSafeRestoreOrder(calls, all) {
   const stop = idx(calls, /^compose stop server$/), psql = idx(calls, PSQL_RE), up = calls.findLastIndex((c) => /^compose up -d --no-deps server caddy$/.test(c));
   a.ok(stop >= 0, 'the server is stopped before the restore:\n' + calls.join('\n') + '\n' + all);
   a.ok(psql > stop, 'psql runs after the server stopped:\n' + calls.join('\n'));
-  const term = idx(calls, TERM_RE);
-  a.ok(term > stop && term < psql, 'other sessions are ended after the stop and before the restore:\n' + calls.join('\n'));
-  a.match(calls[term], /datname = current_database\(\) AND pid <> pg_backend_pid\(\)/);
+  // Ending the other sessions and the restore are ONE psql session and ONE transaction (no gap for a new lock to slip
+  // in), with a bounded lock_timeout set first: -c SET, -c terminate, then -f - (the dump), in that order.
+  a.equal(calls.filter((c) => /compose exec -T postgres psql /.test(c)).length, 1, 'a single psql call:\n' + calls.join('\n'));
+  a.match(calls[psql], /-c SET lock_timeout = '60s' -c SELECT count\(pg_terminate_backend\(pid\)\) .*datname = current_database\(\) AND pid <> pg_backend_pid\(\) -f -$/);
   a.ok(up > psql, 'the old server starts only after the restore:\n' + calls.join('\n'));
   a.match(calls[psql], /-v ON_ERROR_STOP=1/);
   a.match(calls[psql], /--single-transaction/);
@@ -776,7 +777,8 @@ t.test('rollback.sh: stop server → restore (ON_ERROR_STOP, one transaction) �
     const r = runScript('rollback.sh', [], d.env);
     a.equal(r.code, 0, r.all);
     assertSafeRestoreOrder(d.calls(), r.all);
-    a.equal(fs.readFileSync(d.log + '.stdin', 'utf8'), '-- dump\nSELECT 1;\n', 'the dump is fed to psql');
+    a.equal(fs.readFileSync(d.log + '.stdin', 'utf8'), "-- dump\nSET lock_timeout = '60s';\nSELECT 1;\n",
+      "the dump is fed to psql, with its own SET lock_timeout = 0 rewritten to the bound");
     a.match(r.out, /PHASE rolled_back/);
   } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
 });
@@ -1023,7 +1025,7 @@ t.test('apply.sh: if the rollback cannot stop the new server, .env names the new
 });
 
 // --- M2: the dump sets lock_timeout = 0, so one leftover session holding a lock would hang the restore forever. ---
-t.test('rollback.sh: if the other database sessions cannot be ended, nothing is restored and it fails loudly', () => {
+t.test('rollback.sh: if the other database sessions cannot be ended, the restore (same session) fails loudly', () => {
   const fs = require('fs');
   const d = rollbackDeploy();
   try {
@@ -1031,7 +1033,7 @@ t.test('rollback.sh: if the other database sessions cannot be ended, nothing is 
     a.notEqual(r.code, 0, r.all);
     a.match(r.out, /PHASE failed/);
     a.match(r.err, /^ERR .*server is stopped/m);
-    a.equal(idx(d.calls(), PSQL_RE), -1, 'no restore');
+    a.equal(d.calls().filter((c) => /^compose up /.test(c)).length, 0, 'the old server is not started');
     a.match(d.envFile(), /^CURRENT_VERSION=0\.0\.2$/m);
   } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
 });
@@ -1099,3 +1101,18 @@ t.test('a successful manual apply of the skipped version clears the skip (auto.j
     a.equal(s.autoSkipped, null, 'the skip is cleared once that version is running');
     a.deepEqual(JSON.parse(fs.readFileSync(path.join(d.dir, 'auto.json'), 'utf8')), { auto: false, skipVersion: null });
   });
+
+t.test('restore_db: RESTORE_LOCK_TIMEOUT takes a plain duration only (it goes into SQL); anything else falls back to 60s', () => {
+  const fs = require('fs');
+  for (const [val, want] of [['5s', "'5s'"], ['1500ms', "'1500ms'"], ['2min', "'2min'"], ["1s'; DROP TABLE x; --", "'60s'"], ['', "'60s'"]]) {
+    const d = rollbackDeploy();
+    try {
+      const r = runScript('rollback.sh', [], { ...d.env, RESTORE_LOCK_TIMEOUT: val });
+      a.equal(r.code, 0, r.all);
+      const call = d.calls().find((c) => /psql .*--single-transaction/.test(c));
+      a.ok(call.includes(`-c SET lock_timeout = ${want} -c`), `${JSON.stringify(val)} → ${want}: ${call}`);
+      a.ok(fs.readFileSync(d.log + '.stdin', 'utf8').includes(`SET lock_timeout = ${want};`));
+      a.ok(!call.includes('DROP TABLE'));
+    } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
+  }
+});

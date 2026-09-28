@@ -55,25 +55,31 @@ healthy() {
 # The dump is plain SQL from `pg_dump --clean --if-exists`: it drops and recreates every object. So:
 #  1. the server is STOPPED first: it holds pooled connections whose locks would block (or race) the drops, and
 #     whatever runs next must not see a half-restored schema. caddy keeps running, so /recovery stays up;
-#  2. every other session on the database is ended: the dump sets lock_timeout = 0, so a leftover session holding a
-#     lock (a stray client, a stuck backend) would make the restore wait forever instead of failing;
-#  3. psql runs with ON_ERROR_STOP=1 in ONE transaction, so any error aborts it with a non-zero exit and the database
-#     is left exactly as it was (without these, psql exits 0 on SQL errors and a failed restore went unreported).
+#  2. ONE psql session, ONE transaction (--single-transaction wraps the -c's and the -f in a single BEGIN/COMMIT, in
+#     order): first a bounded lock_timeout, then every other session on the database is ended (a stray client or a
+#     stuck backend holding a lock), then the dump. Same session, so no gap for a new lock to slip in between;
+#  3. the bound holds for the whole dump: its preamble says `SET lock_timeout = 0;`, which would cancel an earlier SET,
+#     so that line is rewritten on the way in. A lock that cannot be ended (e.g. a prepared transaction) is then a loud
+#     "lock timeout" failure instead of a restore that hangs forever;
+#  4. ON_ERROR_STOP=1: any error aborts the transaction with a non-zero exit and the database is left exactly as it
+#     was (without it, psql exits 0 on SQL errors and a failed restore went unreported).
 # The caller switches .env to the backup's versions only AFTER this succeeds, so on any failure .env still names the
 # version the database belongs to (a later `docker compose up` never pairs old images with the new database). On a
 # failed restore the server is left stopped on purpose. The operator retries Roll back (same backup) once the cause is
 # fixed; DEPLOY.md has the by-hand restore.
 restore_db() {
-  local sql="$1" log="$2" running
+  local sql="$1" log="$2" running lt="${RESTORE_LOCK_TIMEOUT:-60s}"
+  printf '%s' "$lt" | grep -Eq '^[0-9]+(ms|s|min)?$' || lt=60s   # a plain duration only: it goes into SQL
   running="$(grep -E '^CURRENT_VERSION=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-)"
   if ! dc stop server; then
     errln "could not stop the server, so the database was NOT restored and nothing was changed: .env still names ${running:-the running version}, which is still running. Fix the cause (see the log above), then Roll back again from /recovery."
     return 1
   fi
-  if ! dc exec -T postgres psql -X -q -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" -c \
-         "SELECT count(pg_terminate_backend(pid)) AS ended FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()" \
-         < /dev/null > "$log" 2>&1 \
-     || ! dc exec -T postgres psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U "$DB_USER" -d "$DB_NAME" < "$sql" >> "$log" 2>&1; then
+  if ! sed "s/^SET lock_timeout = 0;\$/SET lock_timeout = '$lt';/" "$sql" \
+     | dc exec -T postgres psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U "$DB_USER" -d "$DB_NAME" \
+         -c "SET lock_timeout = '$lt'" \
+         -c "SELECT count(pg_terminate_backend(pid)) AS ended FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()" \
+         -f - > "$log" 2>&1; then
     # The psql text goes to the supervisor log as a plain line (and stays in $log); the ERR line reaches the public
     # /update/status, so it only points at the file.
     echo "psql: $(grep -m1 -E 'ERROR|FATAL' "$log" || tail -n1 "$log")" >&2
