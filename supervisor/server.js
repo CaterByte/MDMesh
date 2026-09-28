@@ -100,28 +100,33 @@ function errText(e) {
   return String((e && e.message) || e) + (cause ? ' (' + cause + ')' : '');
 }
 
-/** Download + minisign-verify a release's manifest. Returns { manifest } when verified, else { error } with the reason
- *  (logged here): refusing is right, but a silent refusal made a private-repo 404 look like a bad signature. */
+/** Download + minisign-verify a release's manifest. Returns { manifest } when verified, else { error }. A silent
+ *  refusal made a private-repo 404 look like a bad signature, so the reason is logged in full ([verify] line) — but
+ *  /update/status is public (Caddy proxies it), so `error` names only the kind of failure: no upstream output
+ *  (minisign's text, fetch causes) and no configuration hints. */
 async function verifyManifest(mAsset, sAsset) {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'mf'));
-  const fail = (why) => { console.log('[verify] manifest not verified:', why); return { error: 'manifest not verified: ' + why }; };
+  const fail = (what, detail) => {
+    console.log('[verify] manifest not verified:', what + (detail ? ': ' + detail : ''));
+    return { error: 'manifest not verified: ' + what + ' (details in the supervisor log)' };
+  };
   try {
     for (const [asset, f] of [[mAsset, 'manifest.json'], [sAsset, 'manifest.json.minisig']]) {
       let r;
-      try { r = await ghAsset(asset); } catch (e) { return fail(`${f}: download failed: ${errText(e)}`); }
-      if (!r.ok) return fail(`${f}: HTTP ${r.status}` + (r.status === 404 && !TOKEN ? ' (a private repo needs GITHUB_TOKEN)' : ''));
+      try { r = await ghAsset(asset); } catch (e) { return fail(`${f}: download failed`, errText(e)); }
+      if (!r.ok) return fail(`${f}: HTTP ${r.status}`, r.status === 404 && !TOKEN ? 'a private repo needs GITHUB_TOKEN' : '');
       fs.writeFileSync(path.join(d, f), Buffer.from(await r.arrayBuffer()));
     }
     const v = cp.spawnSync('minisign', ['-V', '-p', PUB, '-m', path.join(d, 'manifest.json')], { encoding: 'utf8' });
-    if (v.error) return fail('minisign could not run: ' + errText(v.error));
+    if (v.error) return fail('minisign could not run', errText(v.error));
     if (v.status !== 0) {
       const why = (v.stderr || v.stdout || '').split(d + path.sep).join('').replace(/\s+/g, ' ').trim();
-      return fail('minisign signature check failed: ' + (why || 'exit ' + v.status));
+      return fail('minisign signature check failed', why || 'exit ' + v.status);
     }
     try { return { manifest: JSON.parse(fs.readFileSync(path.join(d, 'manifest.json'), 'utf8')) }; }
-    catch (e) { return fail('manifest.json is not valid JSON: ' + errText(e)); }
+    catch (e) { return fail('manifest.json is not valid JSON', errText(e)); }
   } catch (e) {
-    return fail(errText(e)); // unreachable / unreadable → refuse, but say why
+    return fail('download or check failed', errText(e)); // unreachable / unreadable → refuse, but say why in the log
   } finally {
     fs.rmSync(d, { recursive: true, force: true });
   }

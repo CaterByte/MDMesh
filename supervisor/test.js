@@ -564,10 +564,11 @@ t.test('an unverifiable release logs why (HTTP status / minisign), without secre
     cp.execFileSync('minisign', ['-G', '-W', '-p', path.join(dir, 'b.pub'), '-s', path.join(dir, 'b.key')], { stdio: 'ignore' });
     gh = await fakeGitHub(dir, { version: '9.9.9' });
     sup = await spawnSupervisor(dir, { ...gh.env, MANIFEST_PUBKEY: path.join(dir, 'b.pub') }, /\[verify\]/, ['--require', gh.preload]);
-    a.match(sup.log(), /\[verify\] .*minisign/i, 'a wrong-key signature is logged as a minisign failure');
+    a.match(sup.log(), /\[verify\] .*minisign.*key id/i, 'a wrong-key signature is logged with minisign\'s own reason');
     let status = await (await fetch(`http://127.0.0.1:${sup.port}/update/status`)).json();
     a.equal(status.verified, false);
-    a.match(status.error, /minisign/i, '/update/status says why');
+    // /update/status is public (Caddy proxies it): the kind of failure only, never upstream output.
+    a.equal(status.error, 'manifest not verified: minisign signature check failed (details in the supervisor log)');
     await stopChild(sup.child);
     await gh.close();
 
@@ -575,7 +576,16 @@ t.test('an unverifiable release logs why (HTTP status / minisign), without secre
     sup = await spawnSupervisor(dir, { ...gh.env }, /\[verify\]/, ['--require', gh.preload]);
     a.match(sup.log(), /\[verify\] .*manifest\.json\.minisig.*HTTP 404/, 'a missing asset is logged with its HTTP status');
     status = await (await fetch(`http://127.0.0.1:${sup.port}/update/status`)).json();
-    a.match(status.error, /HTTP 404/);
+    a.equal(status.error, 'manifest not verified: manifest.json.minisig: HTTP 404 (details in the supervisor log)');
+    await stopChild(sup.child);
+    await gh.close();
+
+    // A private repo without GITHUB_TOKEN: the hint is for the operator's log, not the public status.
+    gh = await fakeGitHub(dir, { version: '9.9.9', privateRepo: true, token: 'x' });
+    sup = await spawnSupervisor(dir, { ...gh.env }, /\[verify\]/, ['--require', gh.preload]);
+    a.match(sup.log(), /\[verify\] .*manifest\.json: HTTP 404.*GITHUB_TOKEN/);
+    status = await (await fetch(`http://127.0.0.1:${sup.port}/update/status`)).json();
+    a.equal(status.error, 'manifest not verified: manifest.json: HTTP 404 (details in the supervisor log)');
   });
 
 // --- Stub docker + curl for driving apply.sh / rollback.sh without a daemon. The stub docker logs every call (one line
@@ -780,7 +790,11 @@ t.test('rollback.sh: a failed restore exits non-zero, says what state the stack 
     a.notEqual(r.code, 0, r.all);
     a.match(r.out, /PHASE failed/);
     a.doesNotMatch(r.out, /PHASE rolled_back/);
-    a.match(r.err, /^ERR database restore failed: .*relation "x" does not exist/m, 'the psql error is surfaced');
+    // The psql text goes to the log (a plain line) and restore.log; the ERR line, which reaches the public
+    // /update/status, only points at the file.
+    a.match(r.err, /^ERR database restore failed: see \/.*\/20260927-120000\.restore\.log$/m, 'a generic ERR');
+    a.match(r.err, /^psql: .*relation "x" does not exist/m, 'the psql error is in the log');
+    a.doesNotMatch(r.err.split('\n').filter((l) => l.startsWith('ERR ')).join('\n'), /relation/, 'no psql text on an ERR line');
     a.match(r.err, /^ERR .*server is stopped/mi, 'the state is spelled out');
     a.match(r.err, /^ERR .*Roll back again/m, 'how to recover is spelled out');
     const calls = d.calls();
@@ -838,7 +852,8 @@ t.test('apply.sh: a failed health check rolls back with the same safe restore; a
     a.equal(r.code, 1, r.all);
     a.match(r.out, /PHASE failed/);
     a.doesNotMatch(r.out, /PHASE rolled_back/);
-    a.match(r.err, /^ERR database restore failed: .*relation "x" does not exist/m);
+    a.match(r.err, /^ERR database restore failed: see \/.*\.restore\.log$/m);
+    a.match(r.err, /^psql: .*relation "x" does not exist/m);
     a.match(r.err, /^ERR .*server is stopped/mi);
     const c2 = d.calls();
     a.equal(c2.slice(idx(c2, PSQL_RE) + 1).filter((c) => /^compose up /.test(c)).length, 0, 'server left stopped:\n' + c2.join('\n'));
@@ -1020,3 +1035,23 @@ t.test('rollback.sh: if the other database sessions cannot be ended, nothing is 
     a.match(d.envFile(), /^CURRENT_VERSION=0\.0\.2$/m);
   } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
 });
+
+t.test('a failed restore reaches /update/status as a pointer to restore.log; the psql text stays in the supervisor log',
+  { timeout: 30000 }, async (tt) => {
+    const fs = require('fs'), path = require('path');
+    const d = rollbackDeploy();
+    fs.writeFileSync(path.join(d.dir, 'recovery.token'), 'tok123');
+    let sup = null;
+    tt.after(async () => { await stopChild(sup && sup.child); fs.rmSync(d.dir, { recursive: true, force: true }); });
+    sup = await spawnSupervisor(d.dir, { ...d.env, APPLY_SUPPORTED: '1', STUB_PSQL_FAIL: '1', SERVER_BASE: 'http://127.0.0.1:9' }, /supervisor on/);
+    const status = async () => (await fetch(`http://127.0.0.1:${sup.port}/update/status`)).json();
+    const r = await fetch(`http://127.0.0.1:${sup.port}/update/rollback`, { method: 'POST',
+      headers: { 'X-MDMesh-Console': '1', 'X-Recovery-Token': 'tok123' } });
+    a.equal(r.status, 202);
+    const s = await waitFor(async () => { const x = await status(); return x.apply && isTerminal(x.apply.phase) && x; }, 'the rollback', 20000);
+    a.equal(s.apply.phase, 'failed');
+    a.match(s.apply.error, /database restore failed: see \/.*\/20260927-120000\.restore\.log/);
+    a.doesNotMatch(s.apply.error, /relation/, 'no psql output in the public status');
+    a.match(sup.log(), /relation "x" does not exist/, 'the psql error is in the supervisor log');
+    a.equal(s.current, '0.0.2', '.env (and current) still name the version the database belongs to');
+  });

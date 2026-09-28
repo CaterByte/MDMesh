@@ -74,7 +74,10 @@ restore_db() {
          "SELECT count(pg_terminate_backend(pid)) AS ended FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()" \
          < /dev/null > "$log" 2>&1 \
      || ! dc exec -T postgres psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U "$DB_USER" -d "$DB_NAME" < "$sql" >> "$log" 2>&1; then
-    errln "database restore failed: $(grep -m1 -E 'ERROR|FATAL' "$log" || tail -n1 "$log")"
+    # The psql text goes to the supervisor log as a plain line (and stays in $log); the ERR line reaches the public
+    # /update/status, so it only points at the file.
+    echo "psql: $(grep -m1 -E 'ERROR|FATAL' "$log" || tail -n1 "$log")" >&2
+    errln "database restore failed: see $log"
     errln "the server is stopped (on purpose: the old version must not run on a database it was not restored for); the database is unchanged (the restore runs in one transaction); .env still names ${running:-the running version}, the version this database belongs to; caddy and /recovery are up. Fix the cause (full psql output: docker compose exec supervisor cat $log), then Roll back again from /recovery; to restore by hand see DEPLOY.md (Recovery)."
     return 1
   fi
