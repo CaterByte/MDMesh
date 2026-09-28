@@ -884,6 +884,10 @@ t.test('apply.sh: a failed pull changed no container, so it resets .env only: no
     const r = runScript('apply.sh', ['0.0.2'], { ...d.env, STUB_FAIL_RE: '^compose pull ' });
     a.equal(r.code, 1, r.all);
     a.match(r.out, /PHASE rolled_back/);
+    // --quiet drops the per-layer progress (most of the log in the live rehearsal); errors still print.
+    a.ok(d.calls().includes('compose pull --quiet server caddy'), d.calls().join('\n'));
+    a.match(r.err, /stub: forced failure: compose pull --quiet server caddy/, 'the pull error output is kept');
+    a.match(r.err, /^ERR image pull failed$/m);
     const calls = d.calls();
     a.equal(idx(calls, /^compose stop /), -1, calls.join('\n'));
     a.equal(idx(calls, PSQL_RE), -1, calls.join('\n'));

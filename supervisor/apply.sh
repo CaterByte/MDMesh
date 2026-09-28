@@ -145,7 +145,7 @@ phase pull
 set_env SERVER_VERSION "$VERSION"
 set_env WEB_VERSION "$VERSION"
 set_env CURRENT_VERSION "$VERSION"
-if ! dc pull server caddy; then
+if ! dc pull --quiet server caddy; then   # --quiet: no per-layer progress; errors still print
   errln "image pull failed"
   rollback env-only
   exit 1
