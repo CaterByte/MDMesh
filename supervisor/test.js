@@ -580,8 +580,9 @@ t.test('an unverifiable release logs why (HTTP status / minisign), without secre
 
 // --- Stub docker + curl for driving apply.sh / rollback.sh without a daemon. The stub docker logs every call (one line
 // per call: its args) to $STUB_LOG and, for `compose exec -T postgres psql|pg_dump`, reads/writes stdio like the real
-// thing. Failure knobs (env): STUB_FAIL_RE (egrep on the args → exit 1), STUB_PSQL_FAIL=1 (psql prints an ERROR and
-// exits 3, as psql -v ON_ERROR_STOP=1 does). curl succeeds unless STUB_CURL_FAIL=1. ---
+// thing. Failure knobs (env): STUB_FAIL_RE (egrep on the args → exit 1), STUB_PSQL_FAIL=1 (the restore psql, the one
+// run with --single-transaction, prints an ERROR and exits 3, as psql -v ON_ERROR_STOP=1 does). curl succeeds unless
+// STUB_CURL_FAIL=1. ---
 function makeStubs(dir) {
   const fs = require('fs'), path = require('path');
   const bin = path.join(dir, 'bin');
@@ -591,7 +592,7 @@ echo "$*" >> "$STUB_LOG"
 if [ -n "\${STUB_FAIL_RE:-}" ] && echo "$*" | grep -Eq "$STUB_FAIL_RE"; then echo "stub: forced failure: $*" >&2; exit 1; fi
 case "$*" in
   *" pg_dump "*) echo "-- stub dump"; echo "SELECT 1;";;
-  *" psql "*)
+  *" psql "*"--single-transaction"*)
     cat > "$STUB_LOG.stdin"
     if [ "\${STUB_PSQL_FAIL:-0}" = 1 ]; then echo 'psql:<stdin>:12: ERROR:  relation "x" does not exist' >&2; exit 3; fi;;
 esac
@@ -733,7 +734,8 @@ t.test('with AUTO_UPDATE on, a rollback is not undone by auto-applying the relea
 // to exit 0), and a failed restore must fail the script loudly, leaving the server stopped rather than running the
 // old version on the un-restored database. ---
 const idx = (calls, re) => calls.findIndex((c) => re.test(c));
-const PSQL_RE = /compose exec -T postgres psql /;
+const PSQL_RE = /compose exec -T postgres psql .*--single-transaction/; // the restore itself
+const TERM_RE = /compose exec -T postgres psql .*pg_terminate_backend/;   // ending the other sessions first
 
 function rollbackDeploy() {
   const fs = require('fs'), path = require('path');
@@ -748,6 +750,9 @@ function assertSafeRestoreOrder(calls, all) {
   const stop = idx(calls, /^compose stop server$/), psql = idx(calls, PSQL_RE), up = calls.findLastIndex((c) => /^compose up -d --no-deps server caddy$/.test(c));
   a.ok(stop >= 0, 'the server is stopped before the restore:\n' + calls.join('\n') + '\n' + all);
   a.ok(psql > stop, 'psql runs after the server stopped:\n' + calls.join('\n'));
+  const term = idx(calls, TERM_RE);
+  a.ok(term > stop && term < psql, 'other sessions are ended after the stop and before the restore:\n' + calls.join('\n'));
+  a.match(calls[term], /datname = current_database\(\) AND pid <> pg_backend_pid\(\)/);
   a.ok(up > psql, 'the old server starts only after the restore:\n' + calls.join('\n'));
   a.match(calls[psql], /-v ON_ERROR_STOP=1/);
   a.match(calls[psql], /--single-transaction/);
@@ -999,4 +1004,18 @@ t.test('apply.sh: if the rollback cannot stop the new server, .env names the new
       a.match(r.err, /^ERR .*\.env still names 0\.0\.2/m);
     } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
   }
+});
+
+// --- M2: the dump sets lock_timeout = 0, so one leftover session holding a lock would hang the restore forever. ---
+t.test('rollback.sh: if the other database sessions cannot be ended, nothing is restored and it fails loudly', () => {
+  const fs = require('fs');
+  const d = rollbackDeploy();
+  try {
+    const r = runScript('rollback.sh', [], { ...d.env, STUB_FAIL_RE: 'pg_terminate_backend' });
+    a.notEqual(r.code, 0, r.all);
+    a.match(r.out, /PHASE failed/);
+    a.match(r.err, /^ERR .*server is stopped/m);
+    a.equal(idx(d.calls(), PSQL_RE), -1, 'no restore');
+    a.match(d.envFile(), /^CURRENT_VERSION=0\.0\.2$/m);
+  } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
 });

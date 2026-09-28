@@ -55,7 +55,9 @@ healthy() {
 # The dump is plain SQL from `pg_dump --clean --if-exists`: it drops and recreates every object. So:
 #  1. the server is STOPPED first: it holds pooled connections whose locks would block (or race) the drops, and
 #     whatever runs next must not see a half-restored schema. caddy keeps running, so /recovery stays up;
-#  2. psql runs with ON_ERROR_STOP=1 in ONE transaction, so any error aborts it with a non-zero exit and the database
+#  2. every other session on the database is ended: the dump sets lock_timeout = 0, so a leftover session holding a
+#     lock (a stray client, a stuck backend) would make the restore wait forever instead of failing;
+#  3. psql runs with ON_ERROR_STOP=1 in ONE transaction, so any error aborts it with a non-zero exit and the database
 #     is left exactly as it was (without these, psql exits 0 on SQL errors and a failed restore went unreported).
 # The caller switches .env to the backup's versions only AFTER this succeeds, so on any failure .env still names the
 # version the database belongs to (a later `docker compose up` never pairs old images with the new database). On a
@@ -68,7 +70,10 @@ restore_db() {
     errln "could not stop the server, so the database was NOT restored and nothing was changed: .env still names ${running:-the running version}, which is still running. Fix the cause (see the log above), then Roll back again from /recovery."
     return 1
   fi
-  if ! dc exec -T postgres psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U "$DB_USER" -d "$DB_NAME" < "$sql" > "$log" 2>&1; then
+  if ! dc exec -T postgres psql -X -q -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" -c \
+         "SELECT count(pg_terminate_backend(pid)) AS ended FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()" \
+         < /dev/null > "$log" 2>&1 \
+     || ! dc exec -T postgres psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U "$DB_USER" -d "$DB_NAME" < "$sql" >> "$log" 2>&1; then
     errln "database restore failed: $(grep -m1 -E 'ERROR|FATAL' "$log" || tail -n1 "$log")"
     errln "the server is stopped (on purpose: the old version must not run on a database it was not restored for); the database is unchanged (the restore runs in one transaction); .env still names ${running:-the running version}, the version this database belongs to; caddy and /recovery are up. Fix the cause (full psql output: docker compose exec supervisor cat $log), then Roll back again from /recovery; to restore by hand see DEPLOY.md (Recovery)."
     return 1
