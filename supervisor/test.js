@@ -1,6 +1,7 @@
 const t = require('node:test');
 const a = require('node:assert');
-const { semverGt, pickRelease, shapeStatus, imageTags, nextPhase, isTerminal, apkAsset, sha256Matches, recoveryPage, isPublishTemp } = require('./lib');
+const { semverGt, pickRelease, shapeStatus, imageTags, nextPhase, isTerminal, apkAsset, sha256Matches, recoveryPage, isPublishTemp,
+  assetRequest, fetchAsset } = require('./lib');
 
 t.test('semverGt', () => {
   a.equal(semverGt('1.2.4', '1.2.3'), true);
@@ -37,11 +38,86 @@ t.test('imageTags', () => {
 
 t.test('apkAsset', () => {
   const manifest = { version: '1.2.0', components: { apk: { file: 'mdmesh-agent.apk', versionCode: 120, sha256: 'abc', signatureChecksum: 'x' } } };
-  const release = { assets: [{ name: 'mdmesh-agent.apk', browser_download_url: 'https://gh/dl/mdmesh-agent.apk' }, { name: 'manifest.json' }] };
-  a.deepEqual(apkAsset(release, manifest), { version: '1.2.0', versionCode: 120, sha256: 'abc', url: 'https://gh/dl/mdmesh-agent.apk' });
+  const release = { assets: [{ name: 'mdmesh-agent.apk', browser_download_url: 'https://gh/dl/mdmesh-agent.apk',
+    url: 'https://api.gh/repos/o/r/releases/assets/7' }, { name: 'manifest.json' }] };
+  // Both URLs are kept: a private repo only serves the bytes through the asset API URL (see assetRequest).
+  a.deepEqual(apkAsset(release, manifest), { version: '1.2.0', versionCode: 120, sha256: 'abc', url: 'https://gh/dl/mdmesh-agent.apk',
+    apiUrl: 'https://api.gh/repos/o/r/releases/assets/7' });
+  const noApi = { assets: [{ name: 'mdmesh-agent.apk', browser_download_url: 'https://gh/dl/mdmesh-agent.apk' }] };
+  a.equal(apkAsset(noApi, manifest).apiUrl, null);
   a.equal(apkAsset({ assets: [] }, manifest), null);     // asset not present
   a.equal(apkAsset(release, { version: '1.2.0', components: {} }), null); // no apk block
   a.equal(apkAsset(null, null), null);
+});
+
+// A private repo 404s browser_download_url even with a token; only the asset API URL + octet-stream + token serves
+// the bytes (live rehearsal, brain/reviews/live-apply-rollback.md).
+t.test('assetRequest — token: asset API URL with octet-stream + Bearer; no token: browser_download_url, no auth', () => {
+  const asset = { url: 'https://api.github.com/repos/o/r/releases/assets/1', browser_download_url: 'https://github.com/o/r/releases/download/v1/m.json' };
+  a.deepEqual(assetRequest(asset, 'tok'), { url: asset.url,
+    headers: { 'User-Agent': 'mdmesh-updater', Accept: 'application/octet-stream', Authorization: 'Bearer tok' } });
+  a.deepEqual(assetRequest(asset, ''), { url: asset.browser_download_url, headers: { 'User-Agent': 'mdmesh-updater' } });
+  // No API URL known (an older cached shape): the browser URL, and the token is never sent to it.
+  a.deepEqual(assetRequest({ browser_download_url: asset.browser_download_url }, 'tok'),
+    { url: asset.browser_download_url, headers: { 'User-Agent': 'mdmesh-updater' } });
+});
+
+/** A scripted fetch: `routes` maps URL → { status, location?, body? }; every call is recorded with its headers. */
+function mockFetch(routes) {
+  const calls = [];
+  const fn = async (url, opts) => {
+    calls.push({ url: String(url), headers: { ...(opts && opts.headers) }, redirect: opts && opts.redirect });
+    const r = routes[String(url)];
+    if (!r) return new Response('nope', { status: 404 });
+    return new Response(r.body == null ? null : r.body, { status: r.status || 200, headers: r.location ? { location: r.location } : {} });
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+t.test('fetchAsset — follows the API 302 to the CDN and never sends the token to another origin', async () => {
+  const asset = { url: 'https://api.github.com/repos/o/r/releases/assets/1', browser_download_url: 'https://github.com/dl/m.json' };
+  const f = mockFetch({
+    [asset.url]: { status: 302, location: 'https://objects.githubusercontent.com/signed?sig=x' },
+    'https://objects.githubusercontent.com/signed?sig=x': { status: 200, body: 'BYTES' },
+  });
+  const r = await fetchAsset(asset, 'tok', f);
+  a.equal(r.status, 200);
+  a.equal(await r.text(), 'BYTES');
+  a.equal(f.calls.length, 2);
+  a.equal(f.calls[0].headers.Authorization, 'Bearer tok');
+  a.equal(f.calls[0].headers.Accept, 'application/octet-stream');
+  a.equal(f.calls[1].headers.Authorization, undefined, 'the token must not reach the CDN host');
+  a.ok(f.calls.every((c) => c.redirect === 'manual'), 'redirects are followed by hand, not by fetch');
+});
+
+t.test('fetchAsset — same-origin redirect keeps the token; once dropped it stays dropped; relative Location resolves', async () => {
+  const f = mockFetch({
+    'https://api.github.com/a': { status: 301, location: '/b' },
+    'https://api.github.com/b': { status: 302, location: 'https://cdn.example/c' },
+    'https://cdn.example/c': { status: 307, location: 'https://api.github.com/d' },
+    'https://api.github.com/d': { status: 200, body: 'D' },
+  });
+  const r = await fetchAsset({ url: 'https://api.github.com/a' }, 'tok', f);
+  a.equal(await r.text(), 'D');
+  a.deepEqual(f.calls.map((c) => [c.url, c.headers.Authorization || null]), [
+    ['https://api.github.com/a', 'Bearer tok'],
+    ['https://api.github.com/b', 'Bearer tok'],
+    ['https://cdn.example/c', null],
+    ['https://api.github.com/d', null],
+  ]);
+});
+
+t.test('fetchAsset — no token: browser_download_url; non-redirect errors are returned; redirect loops are cut off', async () => {
+  const f = mockFetch({ 'https://github.com/dl/m.json': { status: 404 } });
+  const r = await fetchAsset({ url: 'https://api.github.com/x', browser_download_url: 'https://github.com/dl/m.json' }, '', f);
+  a.equal(r.status, 404);
+  a.equal(f.calls[0].url, 'https://github.com/dl/m.json');
+  a.equal(f.calls[0].headers.Authorization, undefined);
+  const loop = mockFetch({ 'https://h/a': { status: 302, location: 'https://h/a' } });
+  await a.rejects(fetchAsset({ browser_download_url: 'https://h/a' }, '', loop), /too many redirects/);
+  a.equal(loop.calls.length, 6);
+  await a.rejects(fetchAsset({}, 'tok', mockFetch({})), /no download URL/);
 });
 
 t.test('sha256Matches — the APK publish gate', () => {
@@ -250,4 +326,168 @@ t.test('/update/status reports the mirrored APK as available once the warm-up do
     a.equal(fs.readFileSync(outside, 'utf8'), 'NOT AN APK', 'the planted link was not written through');
     a.deepEqual(fs.readdirSync(files).sort(), ['agent.apk', 'agent.apk.tmp'],
       'no temp file is left behind, and the stale one that appeared before the publish is gone');
+  });
+
+// --- Shared harness for the process-level tests below: a free port, and server.js spawned with a clean env. ---
+function freePort() {
+  const http = require('http');
+  return new Promise((r) => { const s = http.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
+}
+/** Spawn server.js with `env` (merged over a minimal safe base) and resolve once `until` appears in its output.
+ *  Returns { child, port, log() }. The caller's tt.after must kill it (use stopChild). */
+async function spawnSupervisor(dir, env, until, extraArgs = []) {
+  const path = require('path');
+  const port = await freePort();
+  const child = cp.spawn(process.execPath, [...extraArgs, path.join(__dirname, 'server.js')], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, GITHUB_REPO: '', GITHUB_TOKEN: '', SUPERVISOR_PORT: String(port), SUPERVISOR_BIND: '127.0.0.1',
+      APPLY_SUPPORTED: '0', AUTO_UPDATE: '0', UPDATE_CHANNEL: 'stable', POLL_INTERVAL_HOURS: '6', CURRENT_VERSION: '0.0.0',
+      MANIFEST_PUBKEY: path.join(dir, 'none.pub'), APK_CACHE_DIR: path.join(dir, 'apk'), PUBLISH_APK_TO: '',
+      AUTO_FILE: path.join(dir, 'auto.json'), RECOVERY_TOKEN_FILE: path.join(dir, 'recovery.token'),
+      COMPOSE_PROJECT_DIR: path.join(dir, 'no-project'), ...env } });
+  let log = '';
+  const onData = (d) => { log += d; };
+  child.stdout.on('data', onData);
+  child.stderr.on('data', onData);
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`never saw ${until}; supervisor output:\n` + log)), 10000);
+      const onExit = (code) => { clearTimeout(timer); reject(new Error(`supervisor exited (${code}):\n${log}`)); };
+      const check = () => { if (until.test(log)) { clearTimeout(timer); child.off('exit', onExit); child.stdout.off('data', check); child.stderr.off('data', check); resolve(); } };
+      child.stdout.on('data', check);
+      child.stderr.on('data', check);
+      child.on('exit', onExit);
+      check();
+    });
+  } catch (e) {
+    await stopChild(child); // never leave a supervisor running (it would keep the test runner alive)
+    throw e;
+  }
+  return { child, port, log: () => log };
+}
+async function stopChild(child) {
+  if (child && child.exitCode === null && child.signalCode === null) {
+    const exited = new Promise((r) => child.once('exit', r));
+    child.kill();
+    await exited;
+  }
+}
+async function waitFor(fn, what, ms = 10000) {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = await fn();
+    if (v) return v;
+    if (Date.now() > end) throw new Error('timed out waiting for ' + what);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+t.test('private repo: with GITHUB_TOKEN the manifest, signature and APK come through the asset API URL, and the token '
+  + 'never reaches the CDN it redirects to', { skip: !HAS_MINISIGN && 'minisign not installed', timeout: 20000 }, async (tt) => {
+  const fs = require('fs'), os = require('os'), path = require('path'), http = require('http'), crypto = require('crypto');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sup-priv-'));
+  let gh = null, cdn = null, sup = null;
+  tt.after(async () => {
+    await stopChild(sup && sup.child);
+    for (const s of [gh, cdn]) if (s) { s.closeAllConnections(); await new Promise((r) => s.close(r)); }
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const TOKEN = 'ghp_TESTTOKEN_' + crypto.randomBytes(6).toString('hex');
+  const apk = crypto.randomBytes(2048);
+  const manifest = { version: '9.9.9', channel: 'stable', components: { apk: {
+    file: 'mdmesh-agent.apk', versionCode: 999, sha256: crypto.createHash('sha256').update(apk).digest('hex') } } };
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest));
+  cp.execFileSync('minisign', ['-G', '-W', '-p', path.join(dir, 'k.pub'), '-s', path.join(dir, 'k.key')], { stdio: 'ignore' });
+  cp.execFileSync('minisign', ['-S', '-s', path.join(dir, 'k.key'), '-m', path.join(dir, 'manifest.json')], { stdio: 'ignore' });
+  const bytes = { 'manifest.json': fs.readFileSync(path.join(dir, 'manifest.json')),
+    'manifest.json.minisig': fs.readFileSync(path.join(dir, 'manifest.json.minisig')), 'mdmesh-agent.apk': apk };
+
+  // The CDN is a different origin (localhost vs 127.0.0.1): it refuses any request that carries the token.
+  const cdnHits = [];
+  cdn = http.createServer((req, res) => {
+    cdnHits.push({ url: req.url, auth: req.headers.authorization || null });
+    if (req.headers.authorization) { res.statusCode = 400; res.end('auth header forwarded'); return; }
+    const name = decodeURIComponent(req.url.replace(/^\/signed\//, '').replace(/\?.*$/, ''));
+    if (bytes[name]) res.end(bytes[name]); else { res.statusCode = 404; res.end(); }
+  });
+  await new Promise((r) => cdn.listen(0, '127.0.0.1', r));
+  // Private-repo GitHub: browser_download_url is always 404; the asset API URL needs the token + octet-stream, then 302s.
+  const apiHits = [];
+  gh = http.createServer((req, res) => {
+    const base = `http://127.0.0.1:${gh.address().port}`;
+    if (req.url.startsWith('/repos/o/r/releases')) {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify([{ tag_name: 'v9.9.9', html_url: base + '/rel', assets: Object.keys(bytes)
+        .map((name) => ({ name, url: `${base}/api/assets/${name}`, browser_download_url: `${base}/dl/${name}` })) }]));
+    } else if (req.url.startsWith('/api/assets/')) {
+      apiHits.push({ auth: req.headers.authorization || null, accept: req.headers.accept });
+      if (req.headers.authorization !== 'Bearer ' + TOKEN || req.headers.accept !== 'application/octet-stream') { res.statusCode = 404; res.end(); return; }
+      res.writeHead(302, { location: `http://localhost:${cdn.address().port}/signed/${req.url.slice('/api/assets/'.length)}?X-Amz-Signature=abc` });
+      res.end();
+    } else { res.statusCode = 404; res.end(); }
+  });
+  await new Promise((r) => gh.listen(0, '127.0.0.1', r));
+  const preload = path.join(dir, 'fake-github.js');
+  fs.writeFileSync(preload, "const f = globalThis.fetch;\n"
+    + "globalThis.fetch = (u, o) => f(String(u).replace('https://api.github.com', process.env.FAKE_GITHUB), o);\n");
+
+  sup = await spawnSupervisor(dir, { FAKE_GITHUB: `http://127.0.0.1:${gh.address().port}`, GITHUB_REPO: 'o/r', GITHUB_TOKEN: TOKEN,
+    CURRENT_VERSION: '9.9.0', MANIFEST_PUBKEY: path.join(dir, 'k.pub') }, /\[apk\] mirrored/, ['--require', preload]);
+  const status = await (await fetch(`http://127.0.0.1:${sup.port}/update/status`)).json();
+  a.equal(status.verified, true, 'the private release verifies:\n' + sup.log());
+  a.equal(status.updateAvailable, true);
+  a.equal(status.apk && status.apk.available, true, 'the APK was mirrored through the API URL');
+  a.equal(apiHits.length, 3, 'manifest, signature and APK all went through the asset API URL');
+  a.equal(cdnHits.length, 3);
+  a.ok(cdnHits.every((h) => h.auth === null), 'no request to the CDN carried the token');
+  a.ok(!sup.log().includes(TOKEN), 'the token never appears in the log');
+});
+
+t.test('an unverifiable release logs why (HTTP status / minisign), without secrets, and says so in /update/status',
+  { skip: !HAS_MINISIGN && 'minisign not installed', timeout: 20000 }, async (tt) => {
+    const fs = require('fs'), os = require('os'), path = require('path'), http = require('http');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sup-bad-'));
+    let gh = null, sup = null;
+    tt.after(async () => {
+      await stopChild(sup && sup.child);
+      if (gh) { gh.closeAllConnections(); await new Promise((r) => gh.close(r)); }
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+    // Signed with key A, verified against key B.
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ version: '9.9.9' }));
+    cp.execFileSync('minisign', ['-G', '-W', '-p', path.join(dir, 'a.pub'), '-s', path.join(dir, 'a.key')], { stdio: 'ignore' });
+    cp.execFileSync('minisign', ['-G', '-W', '-p', path.join(dir, 'b.pub'), '-s', path.join(dir, 'b.key')], { stdio: 'ignore' });
+    cp.execFileSync('minisign', ['-S', '-s', path.join(dir, 'a.key'), '-m', path.join(dir, 'manifest.json')], { stdio: 'ignore' });
+    let sigStatus = 200;
+    gh = http.createServer((req, res) => {
+      const base = `http://127.0.0.1:${gh.address().port}`;
+      if (req.url.startsWith('/repos/o/r/releases')) {
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify([{ tag_name: 'v9.9.9', assets: ['manifest.json', 'manifest.json.minisig']
+          .map((name) => ({ name, browser_download_url: `${base}/dl/${name}` })) }]));
+      } else if (req.url === '/dl/manifest.json') res.end(fs.readFileSync(path.join(dir, 'manifest.json')));
+      else if (req.url === '/dl/manifest.json.minisig') {
+        if (sigStatus !== 200) { res.statusCode = sigStatus; res.end(); return; }
+        res.end(fs.readFileSync(path.join(dir, 'manifest.json.minisig')));
+      } else { res.statusCode = 404; res.end(); }
+    });
+    await new Promise((r) => gh.listen(0, '127.0.0.1', r));
+    const preload = path.join(dir, 'fake-github.js');
+    fs.writeFileSync(preload, "const f = globalThis.fetch;\n"
+      + "globalThis.fetch = (u, o) => f(String(u).replace('https://api.github.com', process.env.FAKE_GITHUB), o);\n");
+
+    sup = await spawnSupervisor(dir, { FAKE_GITHUB: `http://127.0.0.1:${gh.address().port}`, GITHUB_REPO: 'o/r',
+      MANIFEST_PUBKEY: path.join(dir, 'b.pub') }, /\[verify\]/, ['--require', preload]);
+    a.match(sup.log(), /\[verify\] .*minisign/i, 'a wrong-key signature is logged as a minisign failure');
+    let status = await (await fetch(`http://127.0.0.1:${sup.port}/update/status`)).json();
+    a.equal(status.verified, false);
+    a.match(status.error, /minisign/i, '/update/status says why');
+    await stopChild(sup.child);
+
+    sigStatus = 404;
+    sup = await spawnSupervisor(dir, { FAKE_GITHUB: `http://127.0.0.1:${gh.address().port}`, GITHUB_REPO: 'o/r',
+      MANIFEST_PUBKEY: path.join(dir, 'b.pub') }, /\[verify\]/, ['--require', preload]);
+    a.match(sup.log(), /\[verify\] .*manifest\.json\.minisig.*HTTP 404/, 'a missing asset is logged with its HTTP status');
+    status = await (await fetch(`http://127.0.0.1:${sup.port}/update/status`)).json();
+    a.match(status.error, /HTTP 404/);
   });

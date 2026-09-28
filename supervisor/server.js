@@ -7,7 +7,7 @@ const os = require('os');
 const cp = require('child_process');
 const path = require('path');
 const crypto = require('crypto');
-const { pickRelease, shapeStatus, imageTags, isTerminal, apkAsset, sha256Matches, recoveryPage, isPublishTemp } = require('./lib');
+const { pickRelease, shapeStatus, imageTags, isTerminal, apkAsset, sha256Matches, recoveryPage, isPublishTemp, fetchAsset } = require('./lib');
 
 const PORT = +(process.env.SUPERVISOR_PORT || 9000);
 // Bind address. Docker keeps the default (all interfaces — the container has no published ports);
@@ -63,18 +63,39 @@ async function ghJson(url) {
   return r.json();
 }
 
-async function verifyManifest(manifestUrl, sigUrl) {
+/** Download a release asset: through the asset API URL with the token when one is set (the only way a private repo
+ *  serves it), else browser_download_url. The one download path for the manifest, its signature and the APK. */
+const ghAsset = (asset) => fetchAsset(asset, TOKEN);
+
+/** A fetch/exec error as one loggable line: the message plus the low-level cause code, never headers or URLs
+ *  (a redirect target is a signed URL, and the token lives in a header). */
+function errText(e) {
+  const cause = e && e.cause && (e.cause.code || e.cause.message);
+  return String((e && e.message) || e) + (cause ? ' (' + cause + ')' : '');
+}
+
+/** Download + minisign-verify a release's manifest. Returns { manifest } when verified, else { error } with the reason
+ *  (logged here): refusing is right, but a silent refusal made a private-repo 404 look like a bad signature. */
+async function verifyManifest(mAsset, sAsset) {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'mf'));
+  const fail = (why) => { console.log('[verify] manifest not verified:', why); return { error: 'manifest not verified: ' + why }; };
   try {
-    for (const [u, f] of [[manifestUrl, 'manifest.json'], [sigUrl, 'manifest.json.minisig']]) {
-      const r = await fetch(u);
-      if (!r.ok) return null;
+    for (const [asset, f] of [[mAsset, 'manifest.json'], [sAsset, 'manifest.json.minisig']]) {
+      let r;
+      try { r = await ghAsset(asset); } catch (e) { return fail(`${f}: download failed: ${errText(e)}`); }
+      if (!r.ok) return fail(`${f}: HTTP ${r.status}` + (r.status === 404 && !TOKEN ? ' (a private repo needs GITHUB_TOKEN)' : ''));
       fs.writeFileSync(path.join(d, f), Buffer.from(await r.arrayBuffer()));
     }
-    cp.execFileSync('minisign', ['-V', '-p', PUB, '-m', path.join(d, 'manifest.json')], { stdio: 'ignore' });
-    return JSON.parse(fs.readFileSync(path.join(d, 'manifest.json'), 'utf8'));
-  } catch {
-    return null; // unsigned / tampered / unreachable → refuse
+    const v = cp.spawnSync('minisign', ['-V', '-p', PUB, '-m', path.join(d, 'manifest.json')], { encoding: 'utf8' });
+    if (v.error) return fail('minisign could not run: ' + errText(v.error));
+    if (v.status !== 0) {
+      const why = (v.stderr || v.stdout || '').split(d + path.sep).join('').replace(/\s+/g, ' ').trim();
+      return fail('minisign signature check failed: ' + (why || 'exit ' + v.status));
+    }
+    try { return { manifest: JSON.parse(fs.readFileSync(path.join(d, 'manifest.json'), 'utf8')) }; }
+    catch (e) { return fail('manifest.json is not valid JSON: ' + errText(e)); }
+  } catch (e) {
+    return fail(errText(e)); // unreachable / unreadable → refuse, but say why
   } finally {
     fs.rmSync(d, { recursive: true, force: true });
   }
@@ -95,7 +116,7 @@ async function ensureApk() {
     const tmp = dest + '.tmp';
     try {
       fs.mkdirSync(APK_DIR, { recursive: true });
-      const r = await fetch(lastApk.url, { redirect: 'follow' }); // GitHub asset 302s to a CDN
+      const r = await ghAsset({ url: lastApk.apiUrl, browser_download_url: lastApk.url }); // 302s to a CDN; see fetchAsset
       if (!r.ok) { console.log('[apk] download failed', r.status); return false; }
       const buf = Buffer.from(await r.arrayBuffer());
       if (!sha256Matches(buf, lastApk.sha256)) { console.log('[apk] sha256 mismatch — refusing to serve'); return false; }
@@ -106,7 +127,7 @@ async function ensureApk() {
       refreshApkAvailable();
       return true;
     } catch (e) {
-      console.log('[apk] error', String((e && e.message) || e));
+      console.log('[apk] error', errText(e));
       try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ }
       return false;
     } finally { apkFetching = null; }
@@ -191,11 +212,11 @@ async function poll() {
     lastRelease = { notes: rel.body || null, url: rel.html_url || null, publishedAt: rel.published_at || null };
     const m = rel.assets.find((a) => a.name === 'manifest.json');
     const s = rel.assets.find((a) => a.name === 'manifest.json.minisig');
-    const manifest = (m && s) ? await verifyManifest(m.browser_download_url, s.browser_download_url) : null;
-    lastManifest = manifest; // only verified manifests are ever stored (verifyManifest returns null otherwise)
+    const v = (m && s) ? await verifyManifest(m, s) : { error: 'release has no manifest.json.minisig' };
+    const manifest = v.manifest || null;
+    lastManifest = manifest; // only verified manifests are ever stored
     lastApk = manifest ? apkAsset(rel, manifest) : null;
-    setStatus({ current: currentVersion, manifest, verified: !!manifest, checkedAt: Date.now(),
-      error: manifest ? null : 'manifest missing or signature invalid' });
+    setStatus({ current: currentVersion, manifest, verified: !!manifest, checkedAt: Date.now(), error: manifest ? null : v.error });
     if (lastApk) void ensureApk(); // warm the mirror cache (download+verify) so a rollout is instant
   } catch (e) {
     state = { ...state, checkedAt: Date.now(), error: String((e && e.message) || e) };

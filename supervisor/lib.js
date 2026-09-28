@@ -1,4 +1,5 @@
-// Pure helpers for the updater supervisor — no I/O, unit-tested (supervisor/test.js).
+// Pure helpers for the updater supervisor — no I/O of their own (fetchAsset takes its fetch as a parameter),
+// unit-tested (supervisor/test.js).
 
 function parseSemver(v) {
   const m = String(v || '').replace(/^v/, '').match(/^(\d+)\.(\d+)\.(\d+)/);
@@ -59,7 +60,43 @@ function apkAsset(release, manifest) {
     versionCode: apk.versionCode,
     sha256: apk.sha256,
     url: asset.browser_download_url,
+    apiUrl: asset.url || null, // the asset API URL: the only one a private repo serves bytes from (assetRequest)
   };
+}
+
+/** Where and how to download a release asset. A PRIVATE repo 404s `browser_download_url` even with a token; only the
+ *  asset API URL (`asset.url`) with `Accept: application/octet-stream` and the token serves the bytes. So: token and
+ *  API URL → the API URL with auth; otherwise the browser URL, never with the token. */
+function assetRequest(asset, token) {
+  const headers = { 'User-Agent': 'mdmesh-updater' };
+  if (token && asset && asset.url) {
+    return { url: asset.url, headers: { ...headers, Accept: 'application/octet-stream', Authorization: 'Bearer ' + token } };
+  }
+  return { url: (asset && asset.browser_download_url) || null, headers };
+}
+
+/** Download a release asset (manifest, signature or APK) per assetRequest, following redirects by hand. The asset API
+ *  answers 302 to a short-lived signed CDN URL on another host: the token must never go there, so Authorization is
+ *  dropped as soon as a redirect changes origin, and never re-added. (Node's fetch strips it too on a cross-origin
+ *  redirect, but that is an implementation detail; this makes the rule explicit and testable.) `fetchImpl` is
+ *  injected so tests can script the responses. Returns the final Response; the caller checks `ok`. */
+async function fetchAsset(asset, token, fetchImpl = globalThis.fetch, maxRedirects = 5) {
+  const req = assetRequest(asset, token);
+  if (!req.url) throw new Error('asset has no download URL');
+  let url = req.url;
+  let headers = req.headers;
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    const r = await fetchImpl(url, { headers, redirect: 'manual' });
+    const loc = r.status >= 300 && r.status < 400 && r.headers.get('location');
+    if (!loc) return r;
+    const next = new URL(loc, url);
+    if (next.origin !== new URL(url).origin && headers.Authorization) {
+      const { Authorization, ...rest } = headers; // eslint-disable-line no-unused-vars
+      headers = rest;
+    }
+    url = next.href;
+  }
+  throw new Error('too many redirects');
 }
 
 // Apply is a linear state machine the console + recovery page poll. The happy path advances
@@ -104,5 +141,5 @@ function recoveryPage(html, applySupported) {
 module.exports = {
   parseSemver, semverGt, pickRelease, shapeStatus,
   imageTags, nextPhase, isTerminal, APPLY_PHASES, APPLY_TERMINAL,
-  apkAsset, sha256Matches, recoveryPage, isPublishTemp,
+  apkAsset, sha256Matches, recoveryPage, isPublishTemp, assetRequest, fetchAsset,
 };
