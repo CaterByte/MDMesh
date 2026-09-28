@@ -46,6 +46,7 @@ function applyRefusal({ manifest, current, skipVersion }) {
   if (!manifest) return 'no verified update available';
   const to = manifest.version;
   if (!to) return 'the verified manifest has no version';
+  if (!parseSemver(to)) return `the verified release version "${to}" is not a release version (X.Y.Z), so it cannot be applied`;
   if (!parseSemver(current)) return `the running version "${current}" is not a release version (X.Y.Z), so it cannot be compared: update by hand`;
   if (semverGt(to, current)) return null;
   if (to === current || !semverGt(current, to)) {

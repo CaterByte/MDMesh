@@ -177,6 +177,11 @@ t.test('applyRefusal — the Update guard says what is actually true', () => {
   a.equal(applyRefusal({ manifest: m('0.0.3'), current: '0.0.4', skipVersion: null }), 'already running 0.0.4 (newer than 0.0.3)');
   a.equal(applyRefusal({ manifest: m('0.0.4'), current: '0.0.4', skipVersion: '0.0.4' }),
     'already running 0.0.4, whose update failed: if it is not healthy, use Roll back (/recovery) to return to the previous version');
+  // A non-release manifest version (not X.Y.Z) is refused for what it is, not as "already running".
+  a.equal(applyRefusal({ manifest: m('nightly'), current: '0.0.4', skipVersion: null }),
+    'the verified release version "nightly" is not a release version (X.Y.Z), so it cannot be applied');
+  a.equal(applyRefusal({ manifest: m('nightly'), current: 'latest', skipVersion: null }),
+    'the verified release version "nightly" is not a release version (X.Y.Z), so it cannot be applied');
   a.equal(applyRefusal({ manifest: m('0.0.4'), current: 'latest', skipVersion: null }),
     'the running version "latest" is not a release version (X.Y.Z), so it cannot be compared: update by hand');
 });
