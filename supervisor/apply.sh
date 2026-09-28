@@ -11,8 +11,8 @@
 # images, re-health-check) → rolled_back, or failed (non-zero, with ERR lines saying what state it is in) if the
 # rollback itself can't recover.
 #
-# supervisor/test.js drives it with a stub docker (order, exit codes, messages); the real Docker path needs a live
-# daemon (see the restore-failure check in .superpowers/sdd/fix-supervisor-apply-report.md) and a staging deploy.
+# supervisor/test.js drives it with a stub docker (order, exit codes, messages). The restore was checked by hand
+# against postgres:14 with a good and a deliberately broken dump; validate the full path on a staging deploy.
 set -uo pipefail   # deliberately NOT -e: failures are handled explicitly so we can roll back.
 
 VERSION="${1:?usage: apply.sh <version>}"

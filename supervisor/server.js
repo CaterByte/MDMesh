@@ -44,7 +44,7 @@ function readCurrentVersion(fallback = process.env.CURRENT_VERSION || '0.0.0') {
 let currentVersion = readCurrentVersion();
 // Last verified manifest from poll() — the source of the image refs an apply will deploy.
 let lastManifest = null;
-// Downloadable APK for the latest verified release {version,versionCode,sha256,url}; null if none.
+// Downloadable APK for the latest verified release {version,versionCode,sha256,url,apiUrl}; null if none.
 let lastApk = null;
 // Release notes / link / date for the picked release {notes,url,publishedAt}; null when no release.
 let lastRelease = null;
