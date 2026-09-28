@@ -58,7 +58,7 @@ restore_db() {
   printf '%s' "$lt" | grep -Eq '^[0-9]+(ms|s|min)?$' || lt=60s   # a plain duration only: it goes into SQL
   running="$(grep -E '^CURRENT_VERSION=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-)"
   if ! dc stop server; then
-    errln "could not stop the server, so the database was NOT restored and nothing was changed: .env still names ${running:-the running version}, which is still running. Fix the cause (see the log above), then Roll back again from /recovery."
+    errln "could not stop the server, so the database was NOT restored and nothing was changed: .env still names ${running:-the running version}, which may still be running (a failed recreate can leave it stopped). Fix the cause (see the log above), then Roll back again from /recovery."
     return 1
   fi
   if ! sed "s/^SET lock_timeout = 0;\$/SET lock_timeout = '$lt';/" "$sql" \

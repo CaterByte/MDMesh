@@ -1024,7 +1024,7 @@ t.test('rollback.sh: when the stop or the restore fails, .env still names the ru
   } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
 });
 
-t.test('apply.sh: if the rollback cannot stop the new server, .env names the new version that is still running', () => {
+t.test('apply.sh: if the rollback cannot stop the new server, .env names the new version, which may still be running', () => {
   const fs = require('fs');
   for (const knob of [{ STUB_FAIL_RE: '^compose stop server$' }, { STUB_PSQL_FAIL: '1' }]) {
     const d = makeDeploy('SERVER_VERSION=0.0.1\nWEB_VERSION=0.0.1\nCURRENT_VERSION=0.0.1\n');
@@ -1036,6 +1036,8 @@ t.test('apply.sh: if the rollback cannot stop the new server, .env names the new
       a.match(d.envFile(), /^WEB_VERSION=0\.0\.2$/m);
       a.match(d.envFile(), /^CURRENT_VERSION=0\.0\.2$/m);
       a.match(r.err, /^ERR .*\.env still names 0\.0\.2/m);
+      // After a failed recreate the new server may or may not be up: the message must not claim it is running.
+      if (knob.STUB_FAIL_RE) a.match(r.err, /^ERR could not stop the server.*which may still be running/m);
     } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
   }
 });
