@@ -1158,3 +1158,31 @@ t.test('backups are private (umask 077): the dump (password hashes), the .env sn
     a.equal(fs.statSync(path.join(d.project, '.env')).mode & 0o777, 0o644, 'the host .env (sed -i / >>) keeps its mode');
   } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
 });
+
+// --- Round 3 (polish review) ---
+// The lock_timeout rewrite must touch only the pg_dump preamble's `SET lock_timeout = 0;` — never a COPY data row or
+// a function-body line that happens to read the same (the first version rewrote every whole-line match).
+t.test('restore_db rewrites only the preamble SET lock_timeout = 0; data rows and function bodies reach psql byte-exact', () => {
+  const fs = require('fs'), path = require('path');
+  const pre = '--\n-- PostgreSQL database dump\n--\n\n\\restrict abc123\n\n-- Dumped from database version 14.24\n\n'
+    + 'SET statement_timeout = 0;\n';
+  const body = "SET idle_in_transaction_session_timeout = 0;\nSELECT pg_catalog.set_config('search_path', '', false);\n"
+    + 'SET client_min_messages = warning;\n\nCREATE TABLE public.t (x text);\n'
+    + 'CREATE FUNCTION public.f() RETURNS integer LANGUAGE plpgsql AS $$\nBEGIN\nSET lock_timeout = 0;\nRETURN 1;\nEND $$;\n'
+    + 'COPY public.t (x) FROM stdin;\nSET lock_timeout = 0;\nkeep me\n\\.\n\nSET lock_timeout = 0;\n';
+  const cases = [
+    // [dump, expected psql stdin]
+    [pre + 'SET lock_timeout = 0;\n' + body, pre + "SET lock_timeout = '60s';\n" + body],
+    // No preamble line at all: nothing may be rewritten (the first whole-line match is then a data row).
+    [pre + body, pre + body],
+  ];
+  for (const [dump, want] of cases) {
+    const d = rollbackDeploy();
+    try {
+      fs.writeFileSync(path.join(d.backups, '20260927-120000.sql'), dump);
+      const r = runScript('rollback.sh', [], d.env);
+      a.equal(r.code, 0, r.all);
+      a.equal(fs.readFileSync(d.log + '.stdin', 'utf8'), want);
+    } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
+  }
+});

@@ -48,7 +48,7 @@ healthy() {
 #     order): first a bounded lock_timeout, then every other session on the database is ended (a stray client or a
 #     stuck backend holding a lock), then the dump. Same session, so no gap for a new lock to slip in between;
 #  3. the bound holds for the whole dump: its preamble says `SET lock_timeout = 0;`, which would cancel an earlier SET,
-#     so that line is rewritten on the way in. A lock that cannot be ended (e.g. a prepared transaction) is then a loud
+#     so that one line (the preamble's, never data) is rewritten on the way in. A lock that cannot be ended (e.g. a prepared transaction) is then a loud
 #     "lock timeout" failure instead of a restore that hangs forever;
 #  4. -o /dev/null: result rows (the dump's setval()s) are dropped, so restore.log holds only notices (the number of
 #     sessions ended) and errors;
@@ -66,7 +66,12 @@ restore_db() {
     errln "could not stop the server, so the database was NOT restored and nothing was changed: .env still names ${running:-the running version}, which may still be running (a failed recreate can leave it stopped). Fix the cause (see the log above), then Roll back again from /recovery."
     return 1
   fi
-  if ! sed "s/^SET lock_timeout = 0;\$/SET lock_timeout = '$lt';/" "$sql" \
+  # Rewrite the preamble's `SET lock_timeout = 0;` (first match only, and only while still in the preamble: blank,
+  # `--`, `\` meta-command, SET and set_config lines). A COPY row or function-body line with the same text is data.
+  if ! awk -v q="'" -v lt="$lt" '
+         !body && $0 == "SET lock_timeout = 0;" { print "SET lock_timeout = " q lt q ";"; body = 1; next }
+         !body && !($0 == "" || /^--/ || /^\\/ || /^SET / || /^SELECT pg_catalog\.set_config\(/) { body = 1 }
+         { print }' "$sql" \
      | dc exec -T postgres psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U "$DB_USER" -d "$DB_NAME" -o /dev/null \
          -c "SET lock_timeout = '$lt'" \
          -c "DO \$restore\$ DECLARE n int; BEGIN SELECT count(pg_terminate_backend(pid)) INTO n FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid(); RAISE NOTICE 'ended % other session(s)', n; END \$restore\$" \
