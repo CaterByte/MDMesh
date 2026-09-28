@@ -601,7 +601,8 @@ exit 0
   fs.writeFileSync(path.join(bin, 'curl'), '#!/usr/bin/env bash\n[ "${STUB_CURL_FAIL:-0}" = 1 ] && exit 7\nexit 0\n', { mode: 0o755 });
   return bin;
 }
-/** A deploy dir (project/.env) + backups dir + stubs under a fresh temp dir. */
+/** A deploy dir (project/.env) + backups dir + stubs under a fresh temp dir. HEALTH_TIMEOUT is 5, not 1: healthy()
+ *  counts whole seconds, so with 1 a loaded machine can cross the deadline before the first (stubbed, instant) probe. */
 function makeDeploy(envText) {
   const fs = require('fs'), os = require('os'), path = require('path');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sup-sh-'));
@@ -612,7 +613,7 @@ function makeDeploy(envText) {
   const log = path.join(dir, 'docker.log');
   fs.writeFileSync(log, '');
   const env = { ...process.env, PATH: bin + path.delimiter + process.env.PATH, STUB_LOG: log, COMPOSE_PROJECT_DIR: project,
-    BACKUP_DIR: backups, HEALTH_TIMEOUT: '1', HEALTH_URL: 'http://stub/health' };
+    BACKUP_DIR: backups, HEALTH_TIMEOUT: '5', HEALTH_URL: 'http://stub/health' };
   return { dir, project, backups, log, env,
     envFile: () => fs.readFileSync(path.join(project, '.env'), 'utf8'),
     calls: () => fs.readFileSync(log, 'utf8').split('\n').filter(Boolean) };
