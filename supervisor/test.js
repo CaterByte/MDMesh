@@ -779,7 +779,9 @@ function assertSafeRestoreOrder(calls, all) {
   // Ending the other sessions and the restore are ONE psql session and ONE transaction (no gap for a new lock to slip
   // in), with a bounded lock_timeout set first: -c SET, -c terminate, then -f - (the dump), in that order.
   a.equal(calls.filter((c) => /compose exec -T postgres psql /.test(c)).length, 1, 'a single psql call:\n' + calls.join('\n'));
-  a.match(calls[psql], /-c SET lock_timeout = '60s' -c SELECT count\(pg_terminate_backend\(pid\)\) .*datname = current_database\(\) AND pid <> pg_backend_pid\(\) -f -$/);
+  a.match(calls[psql], /-c SET lock_timeout = '60s' -c DO \$restore\$.*count\(pg_terminate_backend\(pid\)\).*datname = current_database\(\) AND pid <> pg_backend_pid\(\).*RAISE NOTICE 'ended % other session\(s\)'.*\$restore\$ -f -$/);
+  // Result rows (the dump's ~50 setval()s) go nowhere; errors and notices (stderr) still reach restore.log.
+  a.match(calls[psql], / -o \/dev\/null /);
   a.ok(up > psql, 'the old server starts only after the restore:\n' + calls.join('\n'));
   a.match(calls[psql], /-v ON_ERROR_STOP=1/);
   a.match(calls[psql], /--single-transaction/);

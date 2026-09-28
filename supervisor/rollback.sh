@@ -50,7 +50,9 @@ healthy() {
 #  3. the bound holds for the whole dump: its preamble says `SET lock_timeout = 0;`, which would cancel an earlier SET,
 #     so that line is rewritten on the way in. A lock that cannot be ended (e.g. a prepared transaction) is then a loud
 #     "lock timeout" failure instead of a restore that hangs forever;
-#  4. ON_ERROR_STOP=1: any error aborts the transaction with a non-zero exit and the database is left exactly as it
+#  4. -o /dev/null: result rows (the dump's setval()s) are dropped, so restore.log holds only notices (the number of
+#     sessions ended) and errors;
+#  5. ON_ERROR_STOP=1: any error aborts the transaction with a non-zero exit and the database is left exactly as it
 #     was (without it, psql exits 0 on SQL errors and a failed restore went unreported).
 # The caller switches .env to the backup's versions only AFTER this succeeds, so on any failure .env still names the
 # version the database belongs to (a later `docker compose up` never pairs old images with the new database). On a
@@ -65,9 +67,9 @@ restore_db() {
     return 1
   fi
   if ! sed "s/^SET lock_timeout = 0;\$/SET lock_timeout = '$lt';/" "$sql" \
-     | dc exec -T postgres psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U "$DB_USER" -d "$DB_NAME" \
+     | dc exec -T postgres psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U "$DB_USER" -d "$DB_NAME" -o /dev/null \
          -c "SET lock_timeout = '$lt'" \
-         -c "SELECT count(pg_terminate_backend(pid)) AS ended FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()" \
+         -c "DO \$restore\$ DECLARE n int; BEGIN SELECT count(pg_terminate_backend(pid)) INTO n FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid(); RAISE NOTICE 'ended % other session(s)', n; END \$restore\$" \
          -f - > "$log" 2>&1; then
     # The psql text goes to the supervisor log as a plain line (and stays in $log); the ERR line reaches the public
     # /update/status, so it only points at the file.
