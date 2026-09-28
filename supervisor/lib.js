@@ -64,37 +64,50 @@ function apkAsset(release, manifest) {
   };
 }
 
+/** Parse `u` as a URL, or null. */
+function parseUrl(u) {
+  try { return new URL(String(u)); } catch { return null; }
+}
+
 /** Where and how to download a release asset. A PRIVATE repo 404s `browser_download_url` even with a token; only the
- *  asset API URL (`asset.url`) with `Accept: application/octet-stream` and the token serves the bytes. So: token and
- *  API URL → the API URL with auth; otherwise the browser URL, never with the token. */
+ *  asset API URL (`asset.url`) with `Accept: application/octet-stream` and the token serves the bytes. The token is
+ *  attached ONLY when that URL is https on api.github.com (the release JSON is data: an asset URL pointing anywhere
+ *  else must not receive it); otherwise the browser URL is used, never with the token. */
 function assetRequest(asset, token) {
   const headers = { 'User-Agent': 'mdmesh-updater' };
-  if (token && asset && asset.url) {
+  const api = token && asset && parseUrl(asset.url);
+  if (api && api.protocol === 'https:' && api.hostname === 'api.github.com' && !api.username && !api.password) {
     return { url: asset.url, headers: { ...headers, Accept: 'application/octet-stream', Authorization: 'Bearer ' + token } };
   }
   return { url: (asset && asset.browser_download_url) || null, headers };
 }
 
-/** Download a release asset (manifest, signature or APK) per assetRequest, following redirects by hand. The asset API
- *  answers 302 to a short-lived signed CDN URL on another host: the token must never go there, so Authorization is
- *  dropped as soon as a redirect changes origin, and never re-added. (Node's fetch strips it too on a cross-origin
+/** Download a release asset (manifest, signature or APK) per assetRequest, following redirects by hand. Every URL,
+ *  the first and each redirect hop, must be https: nothing (least of all the token) goes over plain http. The asset
+ *  API answers 302 to a short-lived signed CDN URL on another host: the token must never go there, so Authorization
+ *  is dropped as soon as a redirect changes origin, and never re-added. (Node's fetch strips it too on a cross-origin
  *  redirect, but that is an implementation detail; this makes the rule explicit and testable.) `fetchImpl` is
  *  injected so tests can script the responses. Returns the final Response; the caller checks `ok`. */
 async function fetchAsset(asset, token, fetchImpl = globalThis.fetch, maxRedirects = 5) {
   const req = assetRequest(asset, token);
   if (!req.url) throw new Error('asset has no download URL');
-  let url = req.url;
+  const httpsOnly = (u) => {
+    const p = parseUrl(u);
+    if (!p || p.protocol !== 'https:') throw new Error('refusing a non-https download URL' + (p ? ' (' + p.protocol + ')' : ''));
+    return p;
+  };
+  let cur = httpsOnly(req.url);
   let headers = req.headers;
   for (let hop = 0; hop <= maxRedirects; hop++) {
-    const r = await fetchImpl(url, { headers, redirect: 'manual' });
+    const r = await fetchImpl(cur.href, { headers, redirect: 'manual' });
     const loc = r.status >= 300 && r.status < 400 && r.headers.get('location');
     if (!loc) return r;
-    const next = new URL(loc, url);
-    if (next.origin !== new URL(url).origin && headers.Authorization) {
+    const next = httpsOnly(new URL(loc, cur).href);
+    if (next.origin !== cur.origin && headers.Authorization) {
       const { Authorization, ...rest } = headers; // eslint-disable-line no-unused-vars
       headers = rest;
     }
-    url = next.href;
+    cur = next;
   }
   throw new Error('too many redirects');
 }
