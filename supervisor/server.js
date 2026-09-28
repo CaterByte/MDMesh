@@ -7,7 +7,7 @@ const os = require('os');
 const cp = require('child_process');
 const path = require('path');
 const crypto = require('crypto');
-const { pickRelease, shapeStatus, imageTags, isTerminal, apkAsset, sha256Matches, recoveryPage, isPublishTemp, fetchAsset,
+const { semverGt, pickRelease, shapeStatus, imageTags, isTerminal, apkAsset, sha256Matches, recoveryPage, isPublishTemp, fetchAsset,
   envValue, applyLine } = require('./lib');
 
 const PORT = +(process.env.SUPERVISOR_PORT || 9000);
@@ -246,15 +246,23 @@ async function poll() {
     setStatus({ current: currentVersion, manifest, verified: !!manifest, checkedAt: Date.now(), error: manifest ? null : v.error });
     if (lastApk) void ensureApk(); // warm the mirror cache (download+verify) so a rollout is instant
   } catch (e) {
-    state = { ...state, checkedAt: Date.now(), error: String((e && e.message) || e) };
+    state = { ...state, current: currentVersion, checkedAt: Date.now(), error: String((e && e.message) || e) };
   }
 }
 
+/** Re-derive the status from what is already known (the last verified manifest) after `current` changed, without
+ *  waiting for GitHub: the follow-up poll can be slow or fail, and until then `current`/`updateAvailable` were stale. */
+function refreshStatus() {
+  setStatus({ current: currentVersion, manifest: lastManifest, verified: !!lastManifest, checkedAt: state.checkedAt, error: state.error });
+}
+
 // Spawn a phase-emitting script (apply.sh/rollback.sh) and stream its PHASE/ERR lines into the live
-// `apply` view. `onClose(code)` finalizes the terminal phase. Shared by apply + rollback.
+// `apply` view. A terminal PHASE line is held back (applyLine ignores it) and handed to `onClose(code, final)`, which
+// publishes it together with the new `current`. Shared by apply + rollback.
 function spawnPhases(args, onClose) {
   const child = cp.spawn('bash', args, { cwd: process.env.COMPOSE_PROJECT_DIR || '/project', env: process.env });
   let buf = '';
+  let final = null;
   const onData = (d) => {
     buf += d.toString();
     let i;
@@ -262,6 +270,7 @@ function spawnPhases(args, onClose) {
       const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
       if (!line) continue;
       console.log('[apply]', line);
+      if (line.startsWith('PHASE ') && isTerminal(line.slice(6).trim())) final = line.slice(6).trim();
       apply = applyLine(apply, line);
       state.apply = apply;
     }
@@ -269,7 +278,7 @@ function spawnPhases(args, onClose) {
   child.stdout.on('data', onData);
   child.stderr.on('data', onData);
   child.on('error', (e) => { apply = { ...apply, phase: 'failed', error: String((e && e.message) || e), finishedAt: Date.now() }; state.apply = apply; });
-  child.on('close', onClose);
+  child.on('close', (code) => onClose(code, final));
 }
 
 // Apply the verified update. `trigger` is 'manual' or 'auto'. Only called when an update is available.
@@ -278,18 +287,21 @@ function startApply(trigger) {
   if (!state.updateAvailable || !lastManifest) return { ok: false, code: 400, msg: 'no verified update available' };
   const { version: toVersion } = imageTags(lastManifest);
   if (!toVersion) return { ok: false, code: 400, msg: 'manifest has no version' };
+  // Belt and braces over updateAvailable: re-applying the running version would overwrite /backups/latest with a dump
+  // of the post-update database, and a later rollback would then restore nothing useful.
+  if (!semverGt(toVersion, currentVersion)) return { ok: false, code: 400, msg: 'already running ' + currentVersion };
 
   apply = { phase: 'authorizing', fromVersion: currentVersion, toVersion, trigger, startedAt: Date.now(), finishedAt: null, error: null };
   state.apply = apply;
-  spawnPhases([APPLY_SCRIPT, toVersion], (code) => {
+  spawnPhases([APPLY_SCRIPT, toVersion], (code, final) => {
     // .env is the record of what is running now: toVersion on success, the restored version after apply.sh rolled back.
     currentVersion = readCurrentVersion(code === 0 ? toVersion : currentVersion);
-    if (code === 0) { apply = { ...apply, phase: 'done', finishedAt: Date.now() }; }
-    else if (!isTerminal(apply.phase)) { apply = { ...apply, phase: 'failed', finishedAt: Date.now() }; }
-    else { apply = { ...apply, finishedAt: Date.now() }; }
+    // apply.sh exits non-zero after any failure, ending at rolled_back or failed.
+    const phase = code === 0 ? 'done' : (final && final !== 'done' ? final : 'failed');
+    apply = { ...apply, phase, finishedAt: Date.now() };
     if (code !== 0) blockAuto(toVersion); // never auto-retry a version that failed, however it was started
-    state.apply = apply;
-    poll(); // refresh latest/updateAvailable against the (possibly new) current version
+    refreshStatus(); // current + updateAvailable now, then ask GitHub
+    poll();
   });
   return { ok: true };
 }
@@ -305,9 +317,8 @@ function startRollback() {
     // will run), so `current` follows it and the update to the version just rolled away from is offered again.
     currentVersion = readCurrentVersion(currentVersion);
     if (apply.fromVersion && apply.fromVersion !== currentVersion) blockAuto(apply.fromVersion);
-    if (!isTerminal(apply.phase)) apply = { ...apply, phase: code === 0 ? 'rolled_back' : 'failed' };
-    apply = { ...apply, toVersion: currentVersion, finishedAt: Date.now() };
-    state.apply = apply;
+    apply = { ...apply, phase: code === 0 ? 'rolled_back' : 'failed', toVersion: currentVersion, finishedAt: Date.now() };
+    refreshStatus();
     poll();
   });
   return { ok: true };

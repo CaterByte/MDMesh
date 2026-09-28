@@ -199,6 +199,9 @@ t.test('applyLine — PHASE sets the phase; every ERR line is kept (the first ca
   a.equal(ap.phase, 'rollback');
   a.equal(ap.error, 'health check failed after 180s | database restore failed: ERROR: boom');
   a.equal(applyLine(ap, 'Container x Started'), ap, 'other lines leave the view alone');
+  // A terminal phase is published by the close handler, together with the new `current`, never straight from the
+  // script's line: a client that stops polling at `done`/`rolled_back` must not read the old version.
+  for (const p of ['done', 'rolled_back', 'failed']) a.equal(applyLine(ap, 'PHASE ' + p).phase, 'rollback', p);
   a.equal(applyLine(ap, 'OK 1.2.3'), ap);
 });
 
@@ -924,4 +927,37 @@ t.test('a failed MANUAL apply also blocks auto-apply of that release, persisted 
     a.equal(s2.updateAvailable, true);
     a.equal(s2.apply, null, 'no auto-apply after the restart:\n' + sup.log());
     a.equal(s2.autoSkipped, '0.0.2');
+  });
+
+// --- M1: /update/status is current as soon as an apply/rollback ends, even if the follow-up poll fails; and a second
+// Update of the version just applied is refused (it would overwrite /backups/latest with a dump of the NEW database). ---
+t.test('after an apply, status shows the new current even when the next poll fails, and a repeat Update is refused',
+  { skip: !HAS_MINISIGN && 'minisign not installed', timeout: 40000 }, async (tt) => {
+    const fs = require('fs'), path = require('path');
+    const d = makeDeploy('SERVER_VERSION=0.0.1\nWEB_VERSION=0.0.1\nCURRENT_VERSION=0.0.1\n');
+    let gh = null, sup = null, authz = null;
+    tt.after(async () => {
+      await stopChild(sup && sup.child); if (gh) await gh.close(); if (authz) await authz.close();
+      fs.rmSync(d.dir, { recursive: true, force: true });
+    });
+    gh = await fakeGitHub(d.dir, { version: '0.0.2', failAfter: 1 }); // the post-apply poll gets a 500
+    authz = await fakeAuthz();
+    sup = await spawnSupervisor(d.dir, { ...d.env, ...gh.env, APPLY_SUPPORTED: '1', AUTO_UPDATE: '0', SERVER_BASE: authz.base },
+      /supervisor on/, ['--require', gh.preload]);
+    const status = async () => (await fetch(`http://127.0.0.1:${sup.port}/update/status`)).json();
+    const before = await waitFor(async () => { const x = await status(); return x.checkedAt && x; }, 'the startup poll');
+    a.equal(before.updateAvailable, true, sup.log());
+
+    const r = await fetch(`http://127.0.0.1:${sup.port}/update/apply`, { method: 'POST', headers: ADMIN });
+    a.equal(r.status, 202);
+    const s = await waitFor(async () => { const x = await status(); return x.checkedAt > before.checkedAt && x; }, 'the post-apply poll', 20000);
+    a.equal(s.apply.phase, 'done', sup.log());
+    a.match(String(s.error), /github 500/, 'the follow-up poll failed');
+    a.equal(s.current, '0.0.2', 'current is the applied version even though the poll failed');
+    a.equal(s.updateAvailable, false, 'the applied release is no longer offered');
+
+    const backups = fs.readdirSync(d.backups).sort();
+    const again = await fetch(`http://127.0.0.1:${sup.port}/update/apply`, { method: 'POST', headers: ADMIN });
+    a.equal(again.status, 400, 'a second Update of the running version is refused');
+    a.deepEqual(fs.readdirSync(d.backups).sort(), backups, 'no second backup overwrote /backups/latest');
   });

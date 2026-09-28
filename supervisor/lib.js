@@ -134,11 +134,16 @@ function nextPhase(p) {
   return i < 0 || i >= APPLY_PHASES.length - 1 ? null : APPLY_PHASES[i + 1];
 }
 
-/** Fold one line of apply.sh/rollback.sh output into the live apply view: `PHASE <p>` sets the phase, `ERR <msg>`
+/** Fold one line of apply.sh/rollback.sh output into the live apply view: `PHASE <p>` sets a non-terminal phase, `ERR <msg>`
  *  appends to the error (kept, not replaced: a failed rollback reports both why the apply failed and what state the
  *  stack is left in); anything else (compose output) returns the view unchanged. */
 function applyLine(ap, line) {
-  if (line.startsWith('PHASE ')) return { ...ap, phase: line.slice(6).trim() };
+  if (line.startsWith('PHASE ')) {
+    const p = line.slice(6).trim();
+    // Terminal phases are published by the close handler, together with the new `current` (server.js spawnPhases):
+    // shown straight from the line, a client that stops polling at `done` could still read the old version.
+    return isTerminal(p) ? ap : { ...ap, phase: p };
+  }
   if (line.startsWith('ERR ')) {
     const e = line.slice(4).trim();
     return { ...ap, error: ap && ap.error ? ap.error + ' | ' + e : e };
