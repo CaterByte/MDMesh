@@ -6,10 +6,13 @@
 # failure. Emits `PHASE <name>` / `ERR <msg>` / `OK <version>` lines on stdout — server.js parses these
 # to drive /update/status. It NEVER touches `supervisor` or `postgres` (no self-destruct, no data loss).
 #
-# Sequence: backup → pull → recreate → healthcheck → done. Any failure → rollback (restore versions +
-# DB, recreate old images, re-health-check) → rolled_back, or failed if rollback itself can't recover.
+# Sequence: backup → pull → recreate → healthcheck → done. A failed pull → rollback of .env only (no container
+# changed yet). A later failure → rollback (restore versions, stop the server, restore the DB, recreate the old
+# images, re-health-check) → rolled_back, or failed (non-zero, with ERR lines saying what state it is in) if the
+# rollback itself can't recover.
 #
-# NOT exercised in CI/sandbox (needs a live Docker daemon). Validate on a staging deploy.
+# supervisor/test.js drives it with a stub docker (order, exit codes, messages); the real Docker path needs a live
+# daemon (see the restore-failure check in .superpowers/sdd/fix-supervisor-apply-report.md) and a staging deploy.
 set -uo pipefail   # deliberately NOT -e: failures are handled explicitly so we can roll back.
 
 VERSION="${1:?usage: apply.sh <version>}"
@@ -48,6 +51,27 @@ healthy() {
   return 1
 }
 
+# --- restore_db <dump> <log>: put the database back to the pre-update dump. Returns non-zero after ERR lines. ---
+# The dump is plain SQL from `pg_dump --clean --if-exists`: it drops and recreates every object. So:
+#  1. the server is STOPPED first: it holds pooled connections whose locks would block (or race) the drops, and
+#     whatever runs next must not see a half-restored schema. caddy keeps running, so /recovery stays up;
+#  2. psql runs with ON_ERROR_STOP=1 in ONE transaction, so any error aborts it with a non-zero exit and the database
+#     is left exactly as it was (without these, psql exits 0 on SQL errors and a failed restore went unreported).
+# On failure the server is left stopped on purpose: the old version must not run on a database it was not restored
+# for. The operator retries Roll back (same backup) once the cause is fixed; DEPLOY.md has the by-hand restore.
+restore_db() {
+  local sql="$1" log="$2"
+  if ! dc stop server; then
+    errln "could not stop the server, so the database was NOT restored and nothing else was changed; .env already names the old versions. Fix the cause (see the log above), then Roll back again from /recovery."
+    return 1
+  fi
+  if ! dc exec -T postgres psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U "$DB_USER" -d "$DB_NAME" < "$sql" > "$log" 2>&1; then
+    errln "database restore failed: $(grep -m1 -E 'ERROR|FATAL' "$log" || tail -n1 "$log")"
+    errln "the server is stopped (on purpose: the old version must not run on a database it was not restored for); the database is unchanged (the restore runs in one transaction); caddy and /recovery are up; .env names the old versions. Fix the cause (full psql output: docker compose exec supervisor cat $log), then Roll back again from /recovery; to restore by hand see DEPLOY.md (Recovery)."
+    return 1
+  fi
+}
+
 OLD_SERVER="$(get_env SERVER_VERSION)"
 OLD_WEB="$(get_env WEB_VERSION)"
 OLD_CURRENT="$(get_env CURRENT_VERSION)"
@@ -61,19 +85,24 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_SQL="$BACKUP_DIR/$STAMP.sql"
 BACKUP_ENV="$BACKUP_DIR/$STAMP.env"
 
-# --- rollback: restore previous versions + DB, recreate, re-health-check ---
+# --- rollback [env-only]: restore previous versions; unless env-only, also stop the server, restore the DB, start
+# the old server and re-health-check. env-only is for a failed pull: no container changed yet, so there is nothing
+# to undo but .env (no downtime, and no writes since the backup are discarded). ---
 rollback() {
   phase rollback
   set_env SERVER_VERSION "$OLD_SERVER"
   set_env WEB_VERSION "$OLD_WEB"
   set_env CURRENT_VERSION "$OLD_CURRENT"
-  dc up -d --no-deps server caddy || errln "rollback recreate failed"
+  if [ "${1:-}" = env-only ]; then phase rolled_back; return; fi
   if [ -s "$BACKUP_SQL" ]; then
-    if ! dc exec -T postgres psql -U "$DB_USER" "$DB_NAME" < "$BACKUP_SQL" >/dev/null 2>&1; then
-      errln "db restore reported errors (see $BACKUP_SQL)"
-    fi
+    restore_db "$BACKUP_SQL" "$BACKUP_DIR/$STAMP.restore.log" || { phase failed; return; }
   fi
-  if healthy; then phase rolled_back; else phase failed; fi
+  if ! dc up -d --no-deps server caddy; then
+    errln "could not start the old server (see the log above); .env names the old versions and the database is restored: run 'docker compose up -d server caddy' in the install directory, or Roll back again from /recovery."
+    phase failed
+    return
+  fi
+  if healthy; then phase rolled_back; else errln "still unhealthy after rollback (${HEALTH_TIMEOUT}s) — manual intervention needed"; phase failed; fi
 }
 
 # ---------------- backup ----------------
@@ -95,7 +124,7 @@ set_env WEB_VERSION "$VERSION"
 set_env CURRENT_VERSION "$VERSION"
 if ! dc pull server caddy; then
   errln "image pull failed"
-  rollback
+  rollback env-only
   exit 1
 fi
 
@@ -110,7 +139,7 @@ fi
 # ---------------- healthcheck ----------------
 phase healthcheck
 if healthy; then
-  phase done
+  phase "done"   # quoted: shellcheck SC1010 reads a bare done as the keyword
   echo "OK $VERSION"
   exit 0
 fi

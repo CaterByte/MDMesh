@@ -1,7 +1,7 @@
 const t = require('node:test');
 const a = require('node:assert');
 const { semverGt, pickRelease, shapeStatus, imageTags, nextPhase, isTerminal, apkAsset, sha256Matches, recoveryPage, isPublishTemp,
-  assetRequest, fetchAsset, envValue } = require('./lib');
+  assetRequest, fetchAsset, envValue, applyLine } = require('./lib');
 
 t.test('semverGt', () => {
   a.equal(semverGt('1.2.4', '1.2.3'), true);
@@ -152,6 +152,19 @@ t.test('apply phase state machine', () => {
   a.equal(isTerminal('failed'), true);
   a.equal(isTerminal('pull'), false);
   a.equal(isTerminal('rollback'), false);
+});
+
+t.test('applyLine — PHASE sets the phase; every ERR line is kept (the first cause and the recovery steps both show)', () => {
+  let ap = { phase: 'authorizing', error: null };
+  ap = applyLine(ap, 'PHASE healthcheck');
+  a.equal(ap.phase, 'healthcheck');
+  ap = applyLine(ap, 'ERR health check failed after 180s');
+  ap = applyLine(ap, 'PHASE rollback');
+  ap = applyLine(ap, 'ERR database restore failed: ERROR: boom');
+  a.equal(ap.phase, 'rollback');
+  a.equal(ap.error, 'health check failed after 180s | database restore failed: ERROR: boom');
+  a.equal(applyLine(ap, 'Container x Started'), ap, 'other lines leave the view alone');
+  a.equal(applyLine(ap, 'OK 1.2.3'), ap);
 });
 
 t.test('recoveryPage — marks the page with whether apply/rollback is supported', () => {
@@ -672,3 +685,129 @@ t.test('with AUTO_UPDATE on, a rollback is not undone by auto-applying the relea
     a.equal(after.updateAvailable, true, '0.0.2 is still offered for a manual Update');
     a.ok(!d.calls().some((c) => c.includes('pg_dump')), 'apply.sh never ran');
   });
+
+// --- Restore safety (apply.sh rollback path + rollback.sh). The DB restore must run with the server STOPPED (it held
+// connections and raced the restore for locks), with psql -v ON_ERROR_STOP=1 in one transaction (a failed restore used
+// to exit 0), and a failed restore must fail the script loudly, leaving the server stopped rather than running the
+// old version on the un-restored database. ---
+const idx = (calls, re) => calls.findIndex((c) => re.test(c));
+const PSQL_RE = /compose exec -T postgres psql /;
+
+function rollbackDeploy() {
+  const fs = require('fs'), path = require('path');
+  const d = makeDeploy('SERVER_VERSION=0.0.2\nWEB_VERSION=0.0.2\nCURRENT_VERSION=0.0.2\n');
+  fs.writeFileSync(path.join(d.backups, 'latest'), '20260927-120000\n');
+  fs.writeFileSync(path.join(d.backups, '20260927-120000.env'), 'SERVER_VERSION=0.0.1\nWEB_VERSION=0.0.1\nCURRENT_VERSION=0.0.1\n');
+  fs.writeFileSync(path.join(d.backups, '20260927-120000.sql'), '-- dump\nSELECT 1;\n');
+  return d;
+}
+
+function assertSafeRestoreOrder(calls, all) {
+  const stop = idx(calls, /^compose stop server$/), psql = idx(calls, PSQL_RE), up = calls.findLastIndex((c) => /^compose up -d --no-deps server caddy$/.test(c));
+  a.ok(stop >= 0, 'the server is stopped before the restore:\n' + calls.join('\n') + '\n' + all);
+  a.ok(psql > stop, 'psql runs after the server stopped:\n' + calls.join('\n'));
+  a.ok(up > psql, 'the old server starts only after the restore:\n' + calls.join('\n'));
+  a.match(calls[psql], /-v ON_ERROR_STOP=1/);
+  a.match(calls[psql], /--single-transaction/);
+}
+
+t.test('rollback.sh: stop server → restore (ON_ERROR_STOP, one transaction) → start → health', () => {
+  const fs = require('fs');
+  const d = rollbackDeploy();
+  try {
+    const r = runScript('rollback.sh', [], d.env);
+    a.equal(r.code, 0, r.all);
+    assertSafeRestoreOrder(d.calls(), r.all);
+    a.equal(fs.readFileSync(d.log + '.stdin', 'utf8'), '-- dump\nSELECT 1;\n', 'the dump is fed to psql');
+    a.match(r.out, /PHASE rolled_back/);
+  } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
+});
+
+t.test('rollback.sh: a failed restore exits non-zero, says what state the stack is in and how to recover, and leaves the '
+  + 'server stopped', () => {
+  const fs = require('fs'), path = require('path');
+  const d = rollbackDeploy();
+  try {
+    const r = runScript('rollback.sh', [], { ...d.env, STUB_PSQL_FAIL: '1' });
+    a.notEqual(r.code, 0, r.all);
+    a.match(r.out, /PHASE failed/);
+    a.doesNotMatch(r.out, /PHASE rolled_back/);
+    a.match(r.err, /^ERR database restore failed: .*relation "x" does not exist/m, 'the psql error is surfaced');
+    a.match(r.err, /^ERR .*server is stopped/mi, 'the state is spelled out');
+    a.match(r.err, /^ERR .*Roll back again/m, 'how to recover is spelled out');
+    const calls = d.calls();
+    a.equal(calls.slice(idx(calls, PSQL_RE) + 1).filter((c) => /^compose up /.test(c)).length, 0,
+      'the old server is not started on the un-restored database:\n' + calls.join('\n'));
+    a.ok(fs.existsSync(path.join(d.backups, '20260927-120000.restore.log')), 'the full psql output is kept');
+  } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
+});
+
+t.test('rollback.sh: if the server cannot be stopped, nothing is restored and the script fails loudly', () => {
+  const fs = require('fs');
+  const d = rollbackDeploy();
+  try {
+    const r = runScript('rollback.sh', [], { ...d.env, STUB_FAIL_RE: '^compose stop server$' });
+    a.notEqual(r.code, 0, r.all);
+    a.match(r.out, /PHASE failed/);
+    a.match(r.err, /^ERR .*could not stop the server/m);
+    a.equal(idx(d.calls(), PSQL_RE), -1, 'no restore against a running server');
+  } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
+});
+
+t.test('rollback.sh: restore ok but the old server does not start or stay healthy → non-zero, failed, and says so', () => {
+  const fs = require('fs');
+  let d = rollbackDeploy();
+  try {
+    let r = runScript('rollback.sh', [], { ...d.env, STUB_FAIL_RE: '^compose up ' });
+    a.notEqual(r.code, 0, r.all);
+    a.match(r.out, /PHASE failed/);
+    a.match(r.err, /^ERR .*could not start/m);
+    fs.rmSync(d.dir, { recursive: true, force: true });
+    d = rollbackDeploy();
+    r = runScript('rollback.sh', [], { ...d.env, STUB_CURL_FAIL: '1', HEALTH_TIMEOUT: '0' });
+    a.notEqual(r.code, 0, r.all);
+    a.match(r.out, /PHASE failed/);
+    a.match(r.err, /^ERR still unhealthy/m);
+  } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
+});
+
+t.test('apply.sh: a failed health check rolls back with the same safe restore; a failed restore fails the apply loudly', () => {
+  const fs = require('fs');
+  let d = makeDeploy('SERVER_VERSION=0.0.1\nWEB_VERSION=0.0.1\nCURRENT_VERSION=0.0.1\n');
+  try {
+    let r = runScript('apply.sh', ['0.0.2'], { ...d.env, STUB_CURL_FAIL: '1', HEALTH_TIMEOUT: '0' });
+    a.equal(r.code, 1, r.all);
+    // The first recreate is the new version's; the rollback's stop → restore → start follows it.
+    const calls = d.calls(), firstUp = idx(calls, /^compose up /);
+    assertSafeRestoreOrder(calls.slice(firstUp + 1), r.all);
+    a.match(r.out, /PHASE rollback/);
+    a.match(r.out, /PHASE failed/, 'still unhealthy after the rollback (curl stub always fails)');
+    a.match(d.envFile(), /^CURRENT_VERSION=0\.0\.1$/m);
+    fs.rmSync(d.dir, { recursive: true, force: true });
+
+    d = makeDeploy('SERVER_VERSION=0.0.1\nWEB_VERSION=0.0.1\nCURRENT_VERSION=0.0.1\n');
+    r = runScript('apply.sh', ['0.0.2'], { ...d.env, STUB_CURL_FAIL: '1', HEALTH_TIMEOUT: '0', STUB_PSQL_FAIL: '1' });
+    a.equal(r.code, 1, r.all);
+    a.match(r.out, /PHASE failed/);
+    a.doesNotMatch(r.out, /PHASE rolled_back/);
+    a.match(r.err, /^ERR database restore failed: .*relation "x" does not exist/m);
+    a.match(r.err, /^ERR .*server is stopped/mi);
+    const c2 = d.calls();
+    a.equal(c2.slice(idx(c2, PSQL_RE) + 1).filter((c) => /^compose up /.test(c)).length, 0, 'server left stopped:\n' + c2.join('\n'));
+  } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
+});
+
+t.test('apply.sh: a failed pull changed no container, so it resets .env only: no stop, no restore, no downtime', () => {
+  const fs = require('fs');
+  const d = makeDeploy('SERVER_VERSION=0.0.1\nWEB_VERSION=0.0.1\nCURRENT_VERSION=0.0.1\n');
+  try {
+    const r = runScript('apply.sh', ['0.0.2'], { ...d.env, STUB_FAIL_RE: '^compose pull ' });
+    a.equal(r.code, 1, r.all);
+    a.match(r.out, /PHASE rolled_back/);
+    const calls = d.calls();
+    a.equal(idx(calls, /^compose stop /), -1, calls.join('\n'));
+    a.equal(idx(calls, PSQL_RE), -1, calls.join('\n'));
+    a.match(d.envFile(), /^SERVER_VERSION=0\.0\.1$/m);
+    a.match(d.envFile(), /^CURRENT_VERSION=0\.0\.1$/m);
+  } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
+});

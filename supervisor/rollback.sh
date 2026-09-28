@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # rollback.sh — restore the most recent pre-update backup (the .env version snapshot + DB dump that
-# apply.sh wrote) and recreate `server` + `caddy`. The break-glass recovery action. Emits PHASE/ERR/OK
-# lines for server.js, mirroring apply.sh. Never touches `supervisor` or `postgres` containers.
+# apply.sh wrote): stop `server`, restore the DB, recreate `server` + `caddy` on the old versions, health-check.
+# The break-glass recovery action. Emits PHASE/ERR/OK lines for server.js, mirroring apply.sh, and exits non-zero on
+# any failure. Never touches `supervisor` or `postgres` containers. Data written since the update is discarded.
 set -uo pipefail
 
 PROJECT_DIR="${COMPOSE_PROJECT_DIR:-/project}"
@@ -36,6 +37,27 @@ healthy() {
   return 1
 }
 
+# --- restore_db <dump> <log>: put the database back to the pre-update dump. Returns non-zero after ERR lines. ---
+# The dump is plain SQL from `pg_dump --clean --if-exists`: it drops and recreates every object. So:
+#  1. the server is STOPPED first: it holds pooled connections whose locks would block (or race) the drops, and
+#     whatever runs next must not see a half-restored schema. caddy keeps running, so /recovery stays up;
+#  2. psql runs with ON_ERROR_STOP=1 in ONE transaction, so any error aborts it with a non-zero exit and the database
+#     is left exactly as it was (without these, psql exits 0 on SQL errors and a failed restore went unreported).
+# On failure the server is left stopped on purpose: the old version must not run on a database it was not restored
+# for. The operator retries Roll back (same backup) once the cause is fixed; DEPLOY.md has the by-hand restore.
+restore_db() {
+  local sql="$1" log="$2"
+  if ! dc stop server; then
+    errln "could not stop the server, so the database was NOT restored and nothing else was changed; .env already names the old versions. Fix the cause (see the log above), then Roll back again from /recovery."
+    return 1
+  fi
+  if ! dc exec -T postgres psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U "$DB_USER" -d "$DB_NAME" < "$sql" > "$log" 2>&1; then
+    errln "database restore failed: $(grep -m1 -E 'ERROR|FATAL' "$log" || tail -n1 "$log")"
+    errln "the server is stopped (on purpose: the old version must not run on a database it was not restored for); the database is unchanged (the restore runs in one transaction); caddy and /recovery are up; .env names the old versions. Fix the cause (full psql output: docker compose exec supervisor cat $log), then Roll back again from /recovery; to restore by hand see DEPLOY.md (Recovery)."
+    return 1
+  fi
+}
+
 phase rollback
 STAMP="$(cat "$BACKUP_DIR/latest" 2>/dev/null)"
 if [ -z "$STAMP" ]; then errln "no backup recorded to roll back to"; phase failed; exit 1; fi
@@ -57,18 +79,20 @@ else
   errln "version snapshot $ENV_SNAP missing — recreating current images"
 fi
 
-dc up -d --no-deps server caddy || errln "recreate failed"
-
-# Restore the database dump (plain SQL with --clean; self-resets to the old schema).
+# Restore the database dump with the server stopped, then start the old server on it.
 if [ -s "$SQL_SNAP" ]; then
-  if ! dc exec -T postgres psql -U "$DB_USER" "$DB_NAME" < "$SQL_SNAP" >/dev/null 2>&1; then
-    errln "db restore reported errors (see $SQL_SNAP)"
-  fi
+  restore_db "$SQL_SNAP" "$BACKUP_DIR/$STAMP.restore.log" || { phase failed; exit 1; }
 else
   errln "db dump $SQL_SNAP missing/empty — restored versions only"
 fi
 
-if healthy; then phase rolled_back; echo "OK"; exit 0; fi
+if ! dc up -d --no-deps server caddy; then
+  errln "could not start the old server (see the log above); .env names the old versions and the database is restored: run 'docker compose up -d server caddy' in the install directory, or Roll back again."
+  phase failed
+  exit 1
+fi
+
+if healthy; then phase rolled_back; echo "OK ${OLD_CURRENT:-}"; exit 0; fi
 errln "still unhealthy after rollback (${HEALTH_TIMEOUT}s) — manual intervention needed"
 phase failed
 exit 1

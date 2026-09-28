@@ -120,6 +120,18 @@ function nextPhase(p) {
   return i < 0 || i >= APPLY_PHASES.length - 1 ? null : APPLY_PHASES[i + 1];
 }
 
+/** Fold one line of apply.sh/rollback.sh output into the live apply view: `PHASE <p>` sets the phase, `ERR <msg>`
+ *  appends to the error (kept, not replaced: a failed rollback reports both why the apply failed and what state the
+ *  stack is left in); anything else (compose output) returns the view unchanged. */
+function applyLine(ap, line) {
+  if (line.startsWith('PHASE ')) return { ...ap, phase: line.slice(6).trim() };
+  if (line.startsWith('ERR ')) {
+    const e = line.slice(4).trim();
+    return { ...ap, error: ap && ap.error ? ap.error + ' | ' + e : e };
+  }
+  return ap;
+}
+
 /** True once an apply has reached a state the UI should stop polling on. */
 function isTerminal(p) {
   return APPLY_TERMINAL.includes(p);
@@ -150,5 +162,5 @@ function recoveryPage(html, applySupported) {
 module.exports = {
   parseSemver, semverGt, pickRelease, shapeStatus,
   imageTags, nextPhase, isTerminal, APPLY_PHASES, APPLY_TERMINAL,
-  apkAsset, sha256Matches, recoveryPage, isPublishTemp, assetRequest, fetchAsset, envValue,
+  apkAsset, sha256Matches, recoveryPage, isPublishTemp, assetRequest, fetchAsset, envValue, applyLine,
 };

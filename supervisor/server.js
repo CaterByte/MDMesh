@@ -8,7 +8,7 @@ const cp = require('child_process');
 const path = require('path');
 const crypto = require('crypto');
 const { pickRelease, shapeStatus, imageTags, isTerminal, apkAsset, sha256Matches, recoveryPage, isPublishTemp, fetchAsset,
-  envValue } = require('./lib');
+  envValue, applyLine } = require('./lib');
 
 const PORT = +(process.env.SUPERVISOR_PORT || 9000);
 // Bind address. Docker keeps the default (all interfaces — the container has no published ports);
@@ -249,8 +249,8 @@ function spawnPhases(args, onClose) {
       const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
       if (!line) continue;
       console.log('[apply]', line);
-      if (line.startsWith('PHASE ')) { apply = { ...apply, phase: line.slice(6).trim() }; state.apply = apply; }
-      else if (line.startsWith('ERR ')) { apply = { ...apply, error: line.slice(4).trim() }; state.apply = apply; }
+      apply = applyLine(apply, line);
+      state.apply = apply;
     }
   };
   child.stdout.on('data', onData);
