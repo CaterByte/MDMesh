@@ -176,7 +176,7 @@ t.test('applyRefusal — the Update guard says what is actually true', () => {
   a.equal(applyRefusal({ manifest: m('0.0.4'), current: '0.0.4', skipVersion: null }), 'already running 0.0.4');
   a.equal(applyRefusal({ manifest: m('0.0.3'), current: '0.0.4', skipVersion: null }), 'already running 0.0.4 (newer than 0.0.3)');
   a.equal(applyRefusal({ manifest: m('0.0.4'), current: '0.0.4', skipVersion: '0.0.4' }),
-    'already running 0.0.4, whose update failed: use Roll back (/recovery) to return to the previous version');
+    'already running 0.0.4, whose update failed: if it is not healthy, use Roll back (/recovery) to return to the previous version');
   a.equal(applyRefusal({ manifest: m('0.0.4'), current: 'latest', skipVersion: null }),
     'the running version "latest" is not a release version (X.Y.Z), so it cannot be compared: update by hand');
 });
@@ -1186,4 +1186,47 @@ t.test('restore_db rewrites only the preamble SET lock_timeout = 0; data rows an
       a.equal(fs.readFileSync(d.log + '.stdin', 'utf8'), want);
     } finally { fs.rmSync(d.dir, { recursive: true, force: true }); }
   }
+});
+
+t.test('the skip is cleared at start-up when that version is already running (nothing left to protect)', { timeout: 20000 }, async (tt) => {
+  const fs = require('fs'), path = require('path');
+  const d = makeDeploy('SERVER_VERSION=0.0.2\nWEB_VERSION=0.0.2\nCURRENT_VERSION=0.0.2\n'); // reached 0.0.2 outside the supervisor
+  fs.writeFileSync(path.join(d.dir, 'auto.json'), JSON.stringify({ auto: true, skipVersion: '0.0.2' }));
+  let sup = null;
+  tt.after(async () => { await stopChild(sup && sup.child); fs.rmSync(d.dir, { recursive: true, force: true }); });
+  sup = await spawnSupervisor(d.dir, { ...d.env, APPLY_SUPPORTED: '1', SERVER_BASE: 'http://127.0.0.1:9' }, /supervisor on/);
+  const s = await waitFor(async () => { const x = await (await fetch(`http://127.0.0.1:${sup.port}/update/status`)).json(); return x.checkedAt && x; }, 'status');
+  a.equal(s.autoSkipped, null);
+  a.deepEqual(JSON.parse(fs.readFileSync(path.join(d.dir, 'auto.json'), 'utf8')), { auto: true, skipVersion: null });
+});
+
+t.test('after a failed apply whose restore also failed, the skip is KEPT while that failure is live; the refusal advises '
+  + 'Roll back only if unhealthy; a restart then clears it', { skip: !HAS_MINISIGN && 'minisign not installed', timeout: 40000 }, async (tt) => {
+  const fs = require('fs'), path = require('path');
+  const d = makeDeploy('SERVER_VERSION=0.0.1\nWEB_VERSION=0.0.1\nCURRENT_VERSION=0.0.1\n');
+  let gh = null, sup = null, authz = null;
+  tt.after(async () => {
+    await stopChild(sup && sup.child); if (gh) await gh.close(); if (authz) await authz.close();
+    fs.rmSync(d.dir, { recursive: true, force: true });
+  });
+  gh = await fakeGitHub(d.dir, { version: '0.0.2' });
+  authz = await fakeAuthz();
+  // Health fails → rollback → the restore fails: .env (and current) stay on 0.0.2, the server is left stopped.
+  const env = { ...d.env, ...gh.env, APPLY_SUPPORTED: '1', SERVER_BASE: authz.base, STUB_CURL_FAIL: '1', HEALTH_TIMEOUT: '0', STUB_PSQL_FAIL: '1' };
+  sup = await spawnSupervisor(d.dir, env, /supervisor on/, ['--require', gh.preload]);
+  const status = async () => (await fetch(`http://127.0.0.1:${sup.port}/update/status`)).json();
+  const before = await waitFor(async () => { const x = await status(); return x.checkedAt && x; }, 'the startup poll');
+  a.equal((await fetch(`http://127.0.0.1:${sup.port}/update/apply`, { method: 'POST', headers: ADMIN })).status, 202);
+  const s = await waitFor(async () => { const x = await status(); return x.checkedAt > before.checkedAt && x; }, 'the post-apply poll', 20000);
+  a.equal(s.apply.phase, 'failed', sup.log());
+  a.equal(s.current, '0.0.2');
+  a.equal(s.autoSkipped, '0.0.2', 'kept: a by-hand rollback plus a restart must not let auto re-apply 0.0.2');
+  const again = await fetch(`http://127.0.0.1:${sup.port}/update/apply`, { method: 'POST', headers: ADMIN });
+  a.deepEqual(await again.json(),
+    { error: 'already running 0.0.2, whose update failed: if it is not healthy, use Roll back (/recovery) to return to the previous version' });
+
+  await stopChild(sup.child);
+  sup = await spawnSupervisor(d.dir, env, /supervisor on/, ['--require', gh.preload]);
+  const s2 = await waitFor(async () => { const x = await status(); return x.checkedAt && x; }, 'the startup poll after restart');
+  a.equal(s2.autoSkipped, null, 'after a restart with 0.0.2 running and no live failure, the skip is cleared');
 });

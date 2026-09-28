@@ -50,7 +50,7 @@ function applyRefusal({ manifest, current, skipVersion }) {
   if (semverGt(to, current)) return null;
   if (to === current || !semverGt(current, to)) {
     return current === skipVersion
-      ? `already running ${current}, whose update failed: use Roll back (/recovery) to return to the previous version`
+      ? `already running ${current}, whose update failed: if it is not healthy, use Roll back (/recovery) to return to the previous version`
       : `already running ${current}`;
   }
   return `already running ${current} (newer than ${to})`;

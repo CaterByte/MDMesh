@@ -79,7 +79,14 @@ function saveAuto() {
     try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ }
   }
 }
-/** Forget the skip (the skipped version was applied successfully by hand). */
+/** The skip only protects against auto-applying a version that is NOT running. Once it is the running version (applied
+ *  by hand, or reached outside the supervisor) there is nothing left to protect, so it is forgotten — except while this
+ *  process's last apply/rollback ended `failed`: then `current` can be the broken version the operator is about to roll
+ *  back by hand, and clearing the skip would let auto-apply re-apply it after that rollback and a restart. */
+function maybeClearSkip() {
+  if (skipVersion && skipVersion === currentVersion && !(apply && apply.phase === 'failed')) clearAutoSkip();
+}
+/** Forget the skip (the skipped version is running). */
 function clearAutoSkip() {
   skipVersion = null;
   saveAuto();
@@ -227,6 +234,7 @@ function removeStalePublishTemps() {
 
 /** Rebuild `state` from a poll result while preserving the live `apply`/`auto` view. */
 function setStatus(args) {
+  maybeClearSkip();
   state = {
     ...shapeStatus(args),
     apply,
@@ -476,5 +484,6 @@ http.createServer(async (req, res) => {
 }).listen(PORT, BIND, () => console.log('supervisor on', BIND + ':' + PORT));
 
 removeStalePublishTemps();
+maybeClearSkip(); // at start-up too, even if GitHub is unreachable (the poll's error path does not rebuild the status)
 poll();
 setInterval(poll, (+(process.env.POLL_INTERVAL_HOURS || 6)) * 3600 * 1000);
