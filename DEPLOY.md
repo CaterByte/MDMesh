@@ -158,10 +158,10 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
 | `GITHUB_REPO` | `owner/repo` to poll for releases (required to enable updates). |
 | `UPDATE_CHANNEL` | `stable` (default) or `beta` (allows prereleases). |
 | `POLL_INTERVAL_HOURS` | How often to check (default `6`). |
-| `GITHUB_TOKEN` | Optional — raises the API rate limit / reads a private repo. |
+| `GITHUB_TOKEN` | Optional for a public `GITHUB_REPO` (raises the API rate limit); **required** for a private one. With a token the supervisor downloads the manifest, its signature and the agent APK through the GitHub asset API, the only way a private repo serves them, and never sends the token to the download host GitHub redirects to. Use a read-only token: fine-grained with **Contents: read** on that repo, or a classic token with `repo` scope. If no update shows up, the supervisor log gives the reason on its `[verify]` line: `docker compose logs supervisor`, or `journalctl -u mdmesh-supervisor` on a native install. |
 | `IMAGE_OWNER` | GHCR owner (lowercase) the versioned images live under. |
 | `SERVER_VERSION` / `WEB_VERSION` | Running image tags **without the `v`** (`0.2.6`, not `v0.2.6`); bumped automatically on apply. `./setup.sh` builds every image from the checkout, so on every run it sets them to the checkout's version (whatever `IMAGE_OWNER` is): the images are named after the code they hold. |
-| `CURRENT_VERSION` | The running release, compared with GitHub's latest to decide "update available". Bumped on apply. `./setup.sh` rewrites it on every run from the checkout's nearest release tag (`vX.Y.Z` or `vX.Y.Z-pre`; other tags are skipped), like the native installer, and with a registry `IMAGE_OWNER` refuses a checkout older than it, or one without a release tag (see below). |
+| `CURRENT_VERSION` | The running release, compared with GitHub's latest to decide "update available". Bumped on apply and set back on rollback; the supervisor reads it from this `.env` at start and after each apply or rollback, so a restart never re-offers a release that is already running. `./setup.sh` rewrites it on every run from the checkout's nearest release tag (`vX.Y.Z` or `vX.Y.Z-pre`; other tags are skipped), like the native installer, and with a registry `IMAGE_OWNER` refuses a checkout older than it, or one without a release tag (see below). |
 | `SUPERVISOR_VERSION` | The supervisor's image tag. Apply never changes it (the supervisor never updates itself). The quick start tracks `latest`, so `docker compose pull && docker compose up -d` delivers supervisor fixes; pin it only if you want to freeze it (then bump it by hand to pick up fixes). `./setup.sh` builds the supervisor from the checkout and sets it to the checkout's version on every run. |
 | `APPLY_SUPPORTED` | `1` shows one-click **Update**, `0` shows the manual steps instead. `./setup.sh` rewrites it on every run from `IMAGE_OWNER` (`local` or unset → `0`); the source compose file defaults to `0`, the release compose to `1`. |
 | `AUTO_UPDATE` | `1` to apply verified releases unattended (also toggleable in **Settings**). |
@@ -169,7 +169,9 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
 - **One-click:** when a verified update is available, a banner appears in the console; an admin clicks
   **Update**, watches the live progress, and the stack rolls back on its own if anything fails.
 - **Unattended:** turn on **Automatic updates** in Settings (or `AUTO_UPDATE=1`) to apply each verified
-  release without a prompt. A release that fails its rollback is never auto-retried.
+  release without a prompt. A release whose apply fails (automatic or by hand), or that you roll back from, is never
+  auto-applied again, even after a restart: it is kept as `skipVersion` in `/backups/auto.json` and shown as
+  `autoSkipped` in `/update/status`. **Update** still applies it by hand, and a newer release auto-applies as usual.
 - **Recovery:** `https://<host>/recovery` shows live apply state and, on quick-start installs, a **Roll back**
   button. While signed in, no token is needed. If the server is down, paste the break-glass recovery token, read with:
   `docker compose exec supervisor cat /backups/recovery.token`. From-source Docker and native installs
@@ -177,6 +179,34 @@ Set these in `.env` (the wizard seeds them; add by hand for an existing deploy):
   instead: `git pull && ./setup.sh` (Docker from source) or `git pull && sudo ./install/install-native.sh` (native).
   Native installs don't proxy it: the supervisor listens on loopback only, so open it from the host with
   `curl 127.0.0.1:9000/recovery` (not `https://<host>/recovery`).
+- **What a rollback does** (the automatic one after a failed update, and **Roll back**): it stops `server`, restores the
+  database dump taken just before the update, then sets the image tags and `CURRENT_VERSION` in `.env` back to the
+  pre-update release, starts the old `server` + `caddy` and waits for health. Anything written to the database after
+  the update is discarded. The restore runs in one transaction and stops at the first error, so a failed restore
+  changes nothing: the rollback then ends as **failed**, `.env` still names the version the database belongs to, and
+  `server` is left **stopped** on purpose (the old version must not run on a database that wasn't restored for it).
+  caddy and `/recovery` stay up. Fix the cause (the full psql output is in the supervisor:
+  `docker compose exec supervisor cat /backups/<stamp>.restore.log`), then press **Roll back** again: it uses the same
+  backup. To restore by hand instead, from the install directory:
+  ```bash
+  STAMP=$(docker compose exec -T supervisor cat /backups/latest)
+  docker compose exec -T supervisor cat "/backups/$STAMP.env"   # the pre-update versions
+  docker compose stop server
+  docker compose exec -T supervisor cat "/backups/$STAMP.sql" \
+    | sed "1,/^SET lock_timeout = 0;\$/s/^SET lock_timeout = 0;\$/SET lock_timeout = '60s';/" \
+    | docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 --single-transaction -U mdmesh -d mdmesh \
+        -c "SET lock_timeout = '60s'" \
+        -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()" \
+        -f -
+  ```
+  In one transaction this ends every other session, then restores with a 60-second lock bound: a lock nothing can end
+  (a prepared transaction) fails with "lock timeout" instead of waiting forever. The `sed` matters: the dump's own
+  header says `SET lock_timeout = 0;`, which would cancel the bound, so its first such line is rewritten (only that
+  one; a data row with the same text is left alone). Then:
+  ```bash
+  # only if that succeeded: copy SERVER_VERSION, WEB_VERSION and CURRENT_VERSION from the .env snapshot above into .env
+  docker compose up -d --no-deps server caddy
+  ```
 - **Source (build) deploys** can't auto-pull, so setup.sh hides one-click Update (`APPLY_SUPPORTED=0`); update with
   `git pull && ./setup.sh`. Re-running `./setup.sh` (rather than `docker compose up -d --build` alone) is what refreshes
   `CURRENT_VERSION`, the image tags and `APPLY_SUPPORTED`; without a release tag (no git, tags not fetched, or only

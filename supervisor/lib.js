@@ -1,4 +1,5 @@
-// Pure helpers for the updater supervisor — no I/O, unit-tested (supervisor/test.js).
+// Pure helpers for the updater supervisor — no I/O of their own (fetchAsset takes its fetch as a parameter),
+// unit-tested (supervisor/test.js).
 
 function parseSemver(v) {
   const m = String(v || '').replace(/^v/, '').match(/^(\d+)\.(\d+)\.(\d+)/);
@@ -37,6 +38,25 @@ function shapeStatus({ current, manifest, verified, checkedAt, error }) {
   };
 }
 
+/** Why an Update must not start, or null if it may. `manifest` is the last VERIFIED manifest (null if none), `current`
+ *  the running version, `skipVersion` the auto-apply skip (it never blocks a manual Update; it only marks a running
+ *  version whose update failed). The version guard matters beyond the banner: re-applying the running (or an older)
+ *  version would overwrite /backups/latest with a dump of the post-update database, leaving nothing to roll back to. */
+function applyRefusal({ manifest, current, skipVersion }) {
+  if (!manifest) return 'no verified update available';
+  const to = manifest.version;
+  if (!to) return 'the verified manifest has no version';
+  if (!parseSemver(to)) return `the verified release version "${to}" is not a release version (X.Y.Z), so it cannot be applied`;
+  if (!parseSemver(current)) return `the running version "${current}" is not a release version (X.Y.Z), so it cannot be compared: update by hand`;
+  if (semverGt(to, current)) return null;
+  if (to === current || !semverGt(current, to)) {
+    return current === skipVersion
+      ? `already running ${current}, whose update failed: if it is not healthy, use Roll back (/recovery) to return to the previous version`
+      : `already running ${current}`;
+  }
+  return `already running ${current} (newer than ${to})`;
+}
+
 /** Pull the image refs + target version a verified manifest applies. */
 function imageTags(manifest) {
   const c = (manifest && manifest.components) || {};
@@ -59,7 +79,66 @@ function apkAsset(release, manifest) {
     versionCode: apk.versionCode,
     sha256: apk.sha256,
     url: asset.browser_download_url,
+    apiUrl: asset.url || null, // the asset API URL: the only one a private repo serves bytes from (assetRequest)
   };
+}
+
+/** Parse `u` as a URL, or null. */
+function parseUrl(u) {
+  try { return new URL(String(u)); } catch { return null; }
+}
+
+/** Where and how to download a release asset. A PRIVATE repo 404s `browser_download_url` even with a token; only the
+ *  asset API URL (`asset.url`) with `Accept: application/octet-stream` and the token serves the bytes. The token is
+ *  attached ONLY when that URL is https on api.github.com (the release JSON is data: an asset URL pointing anywhere
+ *  else must not receive it); otherwise the browser URL is used, never with the token. */
+function assetRequest(asset, token) {
+  const headers = { 'User-Agent': 'mdmesh-updater' };
+  const api = token && asset && parseUrl(asset.url);
+  if (api && api.protocol === 'https:' && api.hostname === 'api.github.com' && !api.username && !api.password) {
+    return { url: asset.url, headers: { ...headers, Accept: 'application/octet-stream', Authorization: 'Bearer ' + token } };
+  }
+  return { url: (asset && asset.browser_download_url) || null, headers };
+}
+
+/** Download a release asset (manifest, signature or APK) per assetRequest, following redirects by hand. Every URL,
+ *  the first and each redirect hop, must be https: nothing (least of all the token) goes over plain http. The asset
+ *  API answers 302 to a short-lived signed CDN URL on another host: the token must never go there, so Authorization
+ *  is dropped as soon as a redirect changes origin, and never re-added. (Node's fetch strips it too on a cross-origin
+ *  redirect, but that is an implementation detail; this makes the rule explicit and testable.) `fetchImpl` is
+ *  injected so tests can script the responses. Returns the final Response; the caller checks `ok`. */
+async function fetchAsset(asset, token, fetchImpl = globalThis.fetch, maxRedirects = 5) {
+  const req = assetRequest(asset, token);
+  if (!req.url) throw new Error('asset has no download URL');
+  const httpsOnly = (u) => {
+    const p = parseUrl(u);
+    if (!p || p.protocol !== 'https:') throw new Error('refusing a non-https download URL' + (p ? ' (' + p.protocol + ')' : ''));
+    return p;
+  };
+  let cur = httpsOnly(req.url);
+  let headers = req.headers;
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    const r = await fetchImpl(cur.href, { headers, redirect: 'manual' });
+    const loc = r.status >= 300 && r.status < 400 && r.headers.get('location');
+    if (!loc) return r;
+    try { await (r.body && r.body.cancel()); } catch { /* already consumed or closed */ } // free the connection
+    const next = httpsOnly(new URL(loc, cur).href);
+    if (next.origin !== cur.origin && headers.Authorization) {
+      const { Authorization, ...rest } = headers; // eslint-disable-line no-unused-vars
+      headers = rest;
+    }
+    cur = next;
+  }
+  throw new Error('too many redirects');
+}
+
+/** The value of `key` in .env text, read like apply.sh's get_env (the first `KEY=` line), with surrounding quotes,
+ *  trailing whitespace and a CR removed. Empty or absent → null. */
+function envValue(text, key) {
+  const line = String(text || '').split('\n').find((l) => l.startsWith(key + '='));
+  if (line == null) return null;
+  const v = line.slice(key.length + 1).trim().replace(/^(['"])(.*)\1$/, '$2');
+  return v || null;
 }
 
 // Apply is a linear state machine the console + recovery page poll. The happy path advances
@@ -72,6 +151,23 @@ const APPLY_TERMINAL = ['done', 'rolled_back', 'failed'];
 function nextPhase(p) {
   const i = APPLY_PHASES.indexOf(p);
   return i < 0 || i >= APPLY_PHASES.length - 1 ? null : APPLY_PHASES[i + 1];
+}
+
+/** Fold one line of apply.sh/rollback.sh output into the live apply view: `PHASE <p>` sets a non-terminal phase, `ERR <msg>`
+ *  appends to the error (kept, not replaced: a failed rollback reports both why the apply failed and what state the
+ *  stack is left in); anything else (compose output) returns the view unchanged. */
+function applyLine(ap, line) {
+  if (line.startsWith('PHASE ')) {
+    const p = line.slice(6).trim();
+    // Terminal phases are published by the close handler, together with the new `current` (server.js spawnPhases):
+    // shown straight from the line, a client that stops polling at `done` could still read the old version.
+    return isTerminal(p) ? ap : { ...ap, phase: p };
+  }
+  if (line.startsWith('ERR ')) {
+    const e = line.slice(4).trim();
+    return { ...ap, error: ap && ap.error ? ap.error + ' | ' + e : e };
+  }
+  return ap;
 }
 
 /** True once an apply has reached a state the UI should stop polling on. */
@@ -104,5 +200,5 @@ function recoveryPage(html, applySupported) {
 module.exports = {
   parseSemver, semverGt, pickRelease, shapeStatus,
   imageTags, nextPhase, isTerminal, APPLY_PHASES, APPLY_TERMINAL,
-  apkAsset, sha256Matches, recoveryPage, isPublishTemp,
+  apkAsset, sha256Matches, recoveryPage, isPublishTemp, assetRequest, fetchAsset, envValue, applyLine, applyRefusal,
 };
