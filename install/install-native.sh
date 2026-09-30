@@ -16,6 +16,8 @@ REPO="$PWD"   # repo root — used for absolute paths inside subshells (e.g. exp
 . "$REPO/install/lib/db.sh"
 # shellcheck source=lib/version.sh
 . "$REPO/install/lib/version.sh"
+# shellcheck source=lib/url.sh
+. "$REPO/install/lib/url.sh"
 
 [ "$(id -u)" = "0" ] || { echo "Run as root (sudo)."; exit 1; }
 command -v apt-get >/dev/null || { echo "This script targets Debian/Ubuntu."; exit 1; }
@@ -128,6 +130,7 @@ if [ -z "$BASE_URL" ]; then
   [ "$ASSUME_YES" = "1" ] && { echo "  BASE_URL must be set when running with -y (e.g. BASE_URL=https://mdm.example.com)."; exit 1; }
   read -rp "  Public base URL (e.g. https://mdm.example.com): " BASE_URL
 fi
+mdm_valid_base_url "$BASE_URL" || exit 1   # install/lib/url.sh: http(s)://host, no whitespace, quotes, < > &
 # HTTP port Tomcat listens on. Override non-interactively with HTTP_PORT=9090; default 8080.
 HTTP_PORT="${HTTP_PORT:-}"
 if [ -z "$HTTP_PORT" ]; then read -rp "  HTTP port [8080]: " _p; HTTP_PORT="${_p:-8080}"; fi

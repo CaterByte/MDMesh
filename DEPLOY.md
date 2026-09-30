@@ -69,6 +69,11 @@ The wizard asks how you want to expose it:
 - **Your own domain** — opens 80/443; Caddy auto-provisions a Let's Encrypt cert. Point the domain's
   DNS at the host first.
 
+The hostname you enter becomes `BASE_URL=https://<hostname>`, the public address that devices and the console use.
+The quick start (Option A), `setup.sh` and the native installer (Option C) check it before writing anything. It must be
+`http://` or `https://` followed by a host (a `:port` and a path are fine), with no whitespace, no control characters
+and none of `"` `'` `<` `>` `&`. A re-run of `./setup.sh` checks the `BASE_URL` already in `.env` the same way.
+
 It writes `.env` (gitignored), builds the images, brings the stack up, seeds the database, and prints
 the console URL and the generated **admin** password (shown once — save it, then change it in the UI).
 
@@ -95,6 +100,9 @@ sudo ./setup.sh --native      # → install/install-native.sh
 `sudo` is only how you become root. The installer itself never calls it, so on a root-only host without sudo (a
 Proxmox LXC container, a minimal Debian image) run `./setup.sh --native` as root. It talks to Postgres as the
 `postgres` account directly, with none of root's environment (`PGHOST` and the like in your shell have no effect).
+
+It asks for the public base URL, or takes it from `BASE_URL=https://mdm.example.com` (required with `-y`). The value
+must follow the same rule as in Option B.
 
 **Upgrading a native install** is the same command after `git pull`. The installer detects existing data and
 asks **Keep** (default, just press Enter) or **Erase** (requires typing `ERASE`). Keep redeploys the code, runs

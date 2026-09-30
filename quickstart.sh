@@ -27,6 +27,26 @@ latest_release() {
   if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$ ]]; then printf '%s\n' "${tag#v}"; fi
 }
 
+# The public base URL rule of install/lib/url.sh: http(s):// and a non-empty host, with no whitespace, control characters
+# or " ' < > &. An identical copy, not a download: this script runs from main but fetches install/lib from the release
+# being installed (see db.sh below), and a release from before url.sh existed does not have it. Keep the two in step.
+mdm_valid_base_url() {
+  local url=$1 rest host why=
+  case "$url" in
+    *[[:cntrl:]]*)     why='it contains a control character (a tab, a newline or similar)' ;;
+    *[[:space:]]*)     why='it contains whitespace' ;;
+    *[\"\'\<\>\&]*)    why="it contains one of the characters \" ' < > &" ;;
+    http://*|https://*)
+      rest=${url#*://}; host=${rest%%[/?#]*}; host=${host##*@}; host=${host%:*}
+      [ -n "$host" ] || why='it has no host after the scheme (expected e.g. https://mdm.example.com)' ;;
+    *)                 why='it must start with http:// or https:// (e.g. https://mdm.example.com)' ;;
+  esac
+  [ -z "$why" ] && return 0
+  case "$url" in *[[:cntrl:]]*) url=$(printf '%q' "$url") ;; esac   # shown as typed, unless that would garble the terminal
+  printf 'Invalid public base URL %s: %s.\n' "${url:-(empty)}" "$why" >&2
+  return 1
+}
+
 command -v docker >/dev/null || { err "Docker is required."; exit 1; }
 docker compose version >/dev/null 2>&1 || { err "Docker Compose v2 is required ('docker compose')."; exit 1; }
 command -v curl    >/dev/null || { err "curl is required."; exit 1; }
@@ -86,6 +106,7 @@ else
   COMPOSE_FILE="docker-compose.yml:docker-compose.domain.yml"; COMPOSE_PROFILES=""
   EXTRA_NOTE="Make sure ${HOST} resolves to this server and ports 80/443 are open."
 fi
+mdm_valid_base_url "$BASE_URL" || { err "Check the hostname you entered, then re-run."; exit 1; }
 
 say "Downloading the pull-only compose + seed…"
 curl -fsSL "${RAW}/docker-compose.release.yml" -o docker-compose.yml

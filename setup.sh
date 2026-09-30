@@ -24,6 +24,8 @@ err()  { printf '\033[1;31m%s\033[0m\n' "$*" >&2; }
 . ./install/lib/db.sh
 # shellcheck source=install/lib/version.sh
 . ./install/lib/version.sh
+# shellcheck source=install/lib/url.sh
+. ./install/lib/url.sh
 rand() { mdm_rand; }
 # Update KEY in .env in place (or append it) — persists values discovered after .env was written
 # (GITHUB_REPO autodetection, the release QR build args) so compose substitution + the supervisor
@@ -104,6 +106,7 @@ if [ -f .env ] && [ "$RESET" != 1 ]; then
   say "Existing .env found — reusing it (secrets + hosting mode kept; use --reset to start over)."
   set -a; . ./.env; set +a
   version_preflight "${CURRENT_VERSION:-${SERVER_VERSION:-}}"
+  mdm_valid_base_url "${BASE_URL:-}" || { err "Fix BASE_URL in .env, then re-run."; exit 1; }
   HOST=${BASE_URL#*://}; HOST=${HOST%%/*}
   if [ "${COMPOSE_PROFILES:-}" = "cloudflare" ]; then
     MODE=1
@@ -154,6 +157,8 @@ else
     COMPOSE_PROFILES=""
     EXTRA_NOTE="Make sure ${HOST} resolves to this server and ports 80/443 are open."
   fi
+  # Checked before .env is written (install/lib/url.sh), so a mistyped hostname leaves nothing behind.
+  mdm_valid_base_url "$BASE_URL" || { err "Check the hostname you entered, then re-run."; exit 1; }
 
   cat > .env <<EOF
 DB_NAME=mdmesh
