@@ -262,10 +262,17 @@ if [ -n "${GITHUB_REPO:-}" ] && command -v python3 >/dev/null && command -v curl
     if [ -n "${GITHUB_TOKEN:-}" ]; then printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN" | curl -H @- "$@"
     else curl "$@"; fi
   }
+  # jget NAME: the download URL of release asset NAME in the release JSON on stdin; empty (and success) when there is
+  # none or the reply is not JSON (no release yet, an empty body, a rate-limit page): under set -euo pipefail a failing
+  # jget would end setup.sh at the assignment instead of taking the "no published release" branch.
   jget() { python3 -c 'import sys,json;
 d=json.load(sys.stdin)
 def asset(n): return next((a["browser_download_url"] for a in d.get("assets",[]) if a["name"]==n),"")
-print({"apk":asset("mdmesh-agent.apk"),"manifest":asset("manifest.json")}.get(sys.argv[1],""))' "$1" 2>/dev/null; }
+print({"apk":asset("mdmesh-agent.apk"),"manifest":asset("manifest.json")}.get(sys.argv[1],""))' "$1" 2>/dev/null || true; }
+  # agent_ck_ok CK: CK looks like an APK signing-certificate checksum (unpadded base64url of a SHA-256: 43 characters of
+  # A-Z a-z 0-9 _ -). It is written to .env, which this script sources as root on every re-run, so nothing else from a
+  # download may go there.
+  agent_ck_ok() { case "$1" in *[!A-Za-z0-9_-]*) return 1 ;; esac; [ "${#1}" -eq 43 ]; }
   REL=$(gh_curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null || true)
   APK_URL=$(printf '%s' "$REL" | jget apk); MAN_URL=$(printf '%s' "$REL" | jget manifest)
   if [ -n "$APK_URL" ] && [ -n "$MAN_URL" ]; then
@@ -273,7 +280,9 @@ print({"apk":asset("mdmesh-agent.apk"),"manifest":asset("manifest.json")}.get(sy
     AGENT_CK=$(printf '%s' "$MAN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["components"]["apk"]["signatureChecksum"])' 2>/dev/null || true)
     WANT_SHA=$(printf '%s' "$MAN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["components"]["apk"]["sha256"])' 2>/dev/null || true)
     TMP_APK=$(mktemp)
-    if gh_curl -fsSL "$APK_URL" -o "$TMP_APK" 2>/dev/null && [ -n "$AGENT_CK" ] \
+    if [ -n "$AGENT_CK" ] && ! agent_ck_ok "$AGENT_CK"; then
+      warn "The release manifest's APK signing checksum is malformed (not 43 base64url characters) — the console keeps its debug enrollment defaults."
+    elif gh_curl -fsSL "$APK_URL" -o "$TMP_APK" 2>/dev/null && [ -n "$AGENT_CK" ] \
        && [ "$(sha256sum "$TMP_APK" | awk '{print $1}')" = "$WANT_SHA" ]; then
       VITE_AGENT_PACKAGE="com.mdmesh.agent"; VITE_AGENT_CHECKSUM="$AGENT_CK"; VITE_AGENT_APK_URL="/files/agent.apk"
       say "Release APK verified (signing checksum ${AGENT_CK}) — the QR will point at /files/agent.apk."
