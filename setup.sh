@@ -30,8 +30,10 @@ rand() { mdm_rand; }
 # Update KEY in .env in place (or append it) — persists values discovered after .env was written
 # (GITHUB_REPO autodetection, the release QR build args) so compose substitution + the supervisor
 # container keep seeing them on later runs.
+# The value is escaped for the sed replacement (\ # &), so any value is written as given.
 setenv() {
-  if grep -q "^$1=" .env 2>/dev/null; then sed -i "s#^$1=.*#$1=$2#" .env; else printf '%s=%s\n' "$1" "$2" >> .env; fi
+  local v=${2//\\/\\\\}; v=${v//#/\\#}; v=${v//&/\\&}
+  if grep -q "^$1=" .env 2>/dev/null; then sed -i "s#^$1=.*#$1=$v#" .env; else printf '%s=%s\n' "$1" "$2" >> .env; fi
 }
 
 RESET=0; ALLOW_DOWNGRADE=0
@@ -106,7 +108,9 @@ if [ -f .env ] && [ "$RESET" != 1 ]; then
   say "Existing .env found — reusing it (secrets + hosting mode kept; use --reset to start over)."
   set -a; . ./.env; set +a
   version_preflight "${CURRENT_VERSION:-${SERVER_VERSION:-}}"
-  mdm_valid_base_url "${BASE_URL:-}" || { err "Fix BASE_URL in .env, then re-run."; exit 1; }
+  _env_base_url=${BASE_URL:-}
+  mdm_check_base_url BASE_URL || { err "Fix BASE_URL in .env, then re-run."; exit 1; }
+  [ "$BASE_URL" = "$_env_base_url" ] || setenv BASE_URL "$BASE_URL"   # the scheme was lower-cased: keep .env canonical
   HOST=${BASE_URL#*://}; HOST=${HOST%%/*}
   if [ "${COMPOSE_PROFILES:-}" = "cloudflare" ]; then
     MODE=1
@@ -158,7 +162,7 @@ else
     EXTRA_NOTE="Make sure ${HOST} resolves to this server and ports 80/443 are open."
   fi
   # Checked before .env is written (install/lib/url.sh), so a mistyped hostname leaves nothing behind.
-  mdm_valid_base_url "$BASE_URL" || { err "Check the hostname you entered, then re-run."; exit 1; }
+  mdm_check_base_url BASE_URL || { err "Check the hostname you entered (the name only, e.g. mdm.example.com), then re-run."; exit 1; }
 
   cat > .env <<EOF
 DB_NAME=mdmesh

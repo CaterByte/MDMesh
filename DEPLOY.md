@@ -71,8 +71,10 @@ The wizard asks how you want to expose it:
 
 The hostname you enter becomes `BASE_URL=https://<hostname>`, the public address that devices and the console use.
 The quick start (Option A), `setup.sh` and the native installer (Option C) check it before writing anything. It must be
-`http://` or `https://` followed by a host (a `:port` and a path are fine), with no whitespace, no control characters
-and none of `"` `'` `<` `>` `&`. A re-run of `./setup.sh` checks the `BASE_URL` already in `.env` the same way.
+`http://` or `https://` (any letter case; it is stored in lowercase) followed by a host name, an IPv4 address or a
+`[bracketed]` IPv6 address, optionally with `:port` and a path, and contain no whitespace, no control characters and
+none of `"` `'` `<` `>` `&`. At a prompt that asks for the hostname, enter the name only (`mdm.example.com`). A re-run of
+`./setup.sh` checks the `BASE_URL` already in `.env` the same way, and rewrites an upper-case scheme there in lowercase.
 
 It writes `.env` (gitignored), builds the images, brings the stack up, seeds the database, and prints
 the console URL and the generated **admin** password (shown once — save it, then change it in the UI).

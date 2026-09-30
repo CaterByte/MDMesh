@@ -27,21 +27,39 @@ latest_release() {
   if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$ ]]; then printf '%s\n' "${tag#v}"; fi
 }
 
-# The public base URL rule of install/lib/url.sh: http(s):// and a non-empty host, with no whitespace, control characters
-# or " ' < > &. An identical copy, not a download: this script runs from main but fetches install/lib from the release
+# The public base URL rule of install/lib/url.sh (see there): http(s)://host[:port], scheme lower-cased, no whitespace,
+# control characters or " ' < > &. An identical copy, not a download: this script runs from main but fetches install/lib from the release
 # being installed (see db.sh below), and a release from before url.sh existed does not have it. Keep the two in step.
-mdm_valid_base_url() {
-  local url=$1 rest host why=
+mdm_check_base_url() {
+  local url=${!1-} rest='' hp host port why=''
   case "$url" in
-    *[[:cntrl:]]*)     why='it contains a control character (a tab, a newline or similar)' ;;
-    *[[:space:]]*)     why='it contains whitespace' ;;
-    *[\"\'\<\>\&]*)    why="it contains one of the characters \" ' < > &" ;;
-    http://*|https://*)
-      rest=${url#*://}; host=${rest%%[/?#]*}; host=${host##*@}; host=${host%:*}
-      [ -n "$host" ] || why='it has no host after the scheme (expected e.g. https://mdm.example.com)' ;;
-    *)                 why='it must start with http:// or https:// (e.g. https://mdm.example.com)' ;;
+    *[[:cntrl:]]*)                why='it contains a control character (a tab, a newline or similar)' ;;
+    *[[:space:]]*)                why='it contains whitespace' ;;
+    *[\"\'\<\>\&]*)               why="it contains one of the characters \" ' < > &" ;;
+    [Hh][Tt][Tt][Pp]://*)         rest=${url#*://}; url="http://$rest" ;;
+    [Hh][Tt][Tt][Pp][Ss]://*)     rest=${url#*://}; url="https://$rest" ;;
+    *)                            why='it must start with http:// or https:// (e.g. https://mdm.example.com)' ;;
   esac
-  [ -z "$why" ] && return 0
+  case "$rest" in
+    [Hh][Tt][Tt][Pp]://*|[Hh][Tt][Tt][Pp][Ss]://*) why='it has the scheme twice (where a hostname is asked for, enter the name only)' ;;
+  esac
+  if [ -z "$why" ]; then
+    hp=${rest%%[/?#]*}; hp=${hp##*@}; host=$hp; port=
+    case "$hp" in
+      *\]) ;;                                                           # [IPv6] with no port
+      *:*) host=${hp%:*}; port=${hp##*:}; [ -n "$port" ] || port=- ;;   # "-" marks an empty port: never valid
+    esac
+    case "$host" in
+      '')            why='it has no host after the scheme (expected e.g. https://mdm.example.com)' ;;
+      \[*\])         ;;
+      *:*|*\[*|*\]*) why="\"$hp\" is not a host or host:port" ;;
+    esac
+    if [ -z "$why" ]; then
+      case "$port" in *[!0-9]*) why="\"$hp\" does not end in a port number after the colon" ;; esac
+    fi
+  fi
+  if [ -z "$why" ]; then printf -v "$1" '%s' "$url"; return 0; fi
+  url=${!1-}
   case "$url" in *[[:cntrl:]]*) url=$(printf '%q' "$url") ;; esac   # shown as typed, unless that would garble the terminal
   printf 'Invalid public base URL %s: %s.\n' "${url:-(empty)}" "$why" >&2
   return 1
@@ -106,7 +124,7 @@ else
   COMPOSE_FILE="docker-compose.yml:docker-compose.domain.yml"; COMPOSE_PROFILES=""
   EXTRA_NOTE="Make sure ${HOST} resolves to this server and ports 80/443 are open."
 fi
-mdm_valid_base_url "$BASE_URL" || { err "Check the hostname you entered, then re-run."; exit 1; }
+mdm_check_base_url BASE_URL || { err "Check the hostname you entered (the name only, e.g. mdm.example.com), then re-run."; exit 1; }
 
 say "Downloading the pull-only compose + seed…"
 curl -fsSL "${RAW}/docker-compose.release.yml" -o docker-compose.yml
