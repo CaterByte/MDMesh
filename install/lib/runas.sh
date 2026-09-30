@@ -43,3 +43,16 @@ as_mdmesh_role() {
     shift
     exec env PATH=/usr/local/bin:/usr/bin:/bin "$1" -h 127.0.0.1 -p 5432 -U mdmesh -d mdmesh "${@:2}" )
 }
+
+# mdm_restore_hint FILE: prints a copy-pasteable command to restore FILE AS the mdmesh role, never as the postgres
+# superuser. A restore run by postgres executes any function the dump's objects define (a CHECK, a DEFAULT), so a
+# compromised mdmesh role could escalate through its own dump; as the owning role it cannot. The command reads the role
+# password from ROOT.xml as the service user (setpriv, run as root), so the password is never on a command line. It
+# needs the install still present (its ROOT.xml and mdmesh role); restore a final uninstall dump into a fresh install.
+mdm_restore_hint() {
+  local root="$CATALINA/conf/Catalina/localhost/ROOT.xml"
+  printf 'restore AS the mdmesh role (never as postgres), with the install present:\n'
+  # shellcheck disable=SC2016  # the $(...) is literal text of the command being printed, not an expansion
+  printf '      PGPASSWORD="$(setpriv --reuid=%s --regid=%s --init-groups sed -n '\''s/.*name=\"JDBC.password\" value=\"\\([^\"]*\\)\".*/\\1/p'\'' %s | head -n1)" \\\n' "$SVC_USER" "$SVC_USER" "$root"
+  printf '        pg_restore -h 127.0.0.1 -p 5432 -U mdmesh -d mdmesh -c --if-exists %s\n' "$1"
+}

@@ -171,6 +171,20 @@ writes a final `pg_dump` to `/root`, and only proceeds when you type `UNINSTALL`
 and services but leaves the database, `/opt/mdmesh/files` and `/opt/mdmesh/backups` in place; `-y` skips the
 prompt for scripted use. Packages installed by apt, your reverse proxy and the git checkout are never touched.
 
+Restore that dump (or a pre-upgrade one from `/opt/mdmesh/backups/`) **as the `mdmesh` role, never as `postgres`**: a
+restore run by a superuser executes any function the dump's own objects define, so a tampered database could escalate
+through its own restore. With an install present (its `ROOT.xml` and `mdmesh` role), from the host as root:
+
+```bash
+PGPASSWORD="$(setpriv --reuid=mdmesh --regid=mdmesh --init-groups \
+  sed -n 's/.*name="JDBC.password" value="\([^"]*\)".*/\1/p' \
+  /opt/mdmesh-tc/conf/Catalina/localhost/ROOT.xml | head -n1)" \
+  pg_restore -h 127.0.0.1 -p 5432 -U mdmesh -d mdmesh -c --if-exists <dump-file>
+```
+
+It reads the role password from `ROOT.xml` as the service user (no password on any command line) and connects as
+`mdmesh` over TCP. The installer and uninstaller print this same command next to each dump they write.
+
 Devices that are still enrolled keep polling the old server URL until they are factory-reset or re-provisioned;
 if you are migrating rather than retiring, keep `BASE_URL` reachable (or point DNS at the new host) so they
 follow.

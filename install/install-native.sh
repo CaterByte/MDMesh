@@ -720,7 +720,8 @@ if [ "$SEED" = no ]; then
   # Dumped as the mdmesh role, not as the postgres superuser (as_mdmesh_role in lib/runas.sh says why); root opens the
   # output file (a root-owned mktemp file).
   if as_mdmesh_role "$DB_PASSWORD" pg_dump -Fc > "$_bk_tmp" 2>>"$LOGFILE" && mv -fT "$_bk_tmp" "$BK"; then
-    ok "pg_dump written: $BK  (restore: pg_restore -c -d mdmesh $BK)"
+    ok "pg_dump written: $BK"
+    printf '    '; mdm_restore_hint "$BK"
   else
     rm -f "$_bk_tmp"
     printf '  %s✗ pg_dump failed — not upgrading without a backup. See %s%s\n' "$c_red" "$LOGFILE" "$c_reset"; exit 1

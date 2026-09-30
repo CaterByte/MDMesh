@@ -105,7 +105,8 @@ if [ "$BACKUP" = 1 ] && db_exists; then
     exit 1
   fi
   chmod 600 "$DUMP"
-  echo "  ✓ final dump: $DUMP  (restore: pg_restore -c -d mdmesh $DUMP)"
+  echo "  ✓ final dump: $DUMP"
+  echo -n "    "; mdm_restore_hint "$DUMP"
 fi
 
 # 2. Stop Tomcat for good: the systemd unit first (cgroup-tracked), then legacy fallbacks for Tomcats
