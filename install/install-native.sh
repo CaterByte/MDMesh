@@ -542,7 +542,10 @@ print({"apk":asset("mdmesh-agent.apk"),"manifest":asset("manifest.json"),
     if ! command -v minisign >/dev/null 2>&1; then
       info "minisign is unavailable, so the release manifest cannot be verified and its APK is not trusted${soft}"; return
     fi
-    AGENT_FETCH_DIR=$(mktemp -d); d=$AGENT_FETCH_DIR
+    # The ERR trap does not fire inside a function (no set -E), so a failure here must be caught here, or the install
+    # would end without a word.
+    AGENT_FETCH_DIR=$(mktemp -d) || { AGENT_FETCH_DIR=""; info "Could not create a temporary directory for the release files${soft}"; return 0; }
+    d=$AGENT_FETCH_DIR
     if ! gh_curl -fsSL "$man_url" -o "$d/manifest.json" 2>>"$LOGFILE" \
        || ! gh_curl -fsSL "$sig_url" -o "$d/manifest.json.minisig" 2>>"$LOGFILE"; then
       info "Could not download the release manifest or its signature (details in $LOGFILE)${soft}"; return
