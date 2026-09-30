@@ -27,43 +27,64 @@ latest_release() {
   if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$ ]]; then printf '%s\n' "${tag#v}"; fi
 }
 
-# The public base URL rule of install/lib/url.sh (see there): http(s)://host[:port], scheme lower-cased, no whitespace,
-# control characters or " ' < > &. An identical copy, not a download: this script runs from main but fetches install/lib from the release
-# being installed (see db.sh below), and a release from before url.sh existed does not have it. Keep the two in step.
+# The BASE_URL rule of install/lib/url.sh (see there for what it accepts and why it is an allowlist). A verbatim copy
+# of the functions between the markers, not a download: this script runs from main but fetches install/lib from the
+# release it installs, which may predate url.sh (see db.sh below). CI (t0-fast, edge entry) fails if the copies differ.
+# >>> url.sh functions (quickstart.sh keeps a verbatim copy) >>>
+# _mdm_hostport_problem HOSTPORT: prints why HOSTPORT is not host[:port] as described above; prints nothing when it is.
+_mdm_hostport_problem() {
+  local hp=$1 host='' port='' v6=''
+  case "$hp" in
+    \[*)
+      v6=${hp#\[}
+      case "$v6" in *\]*) ;; *) echo "\"$hp\" has no closing ]"; return ;; esac
+      port=${v6#*\]}; v6=${v6%%\]*}
+      case "$v6" in
+        ''|*[!0-9A-Fa-f:.]*|*:::*|*::*::*|*:*:*:*:*:*:*:*:*) echo "\"[$v6]\" is not an IPv6 address"; return ;;
+        *:*) ;;
+        *) echo "\"[$v6]\" is not an IPv6 address"; return ;;
+      esac
+      case "$port" in '') return ;; :*) port=${port#:}; [ -n "$port" ] || port=- ;; *) echo "\"$hp\": only :port may follow ]"; return ;; esac ;;
+    *)
+      host=${hp%%:*}
+      case "$hp" in *:*) port=${hp#*:}; [ -n "$port" ] || port=- ;; esac
+      case "$host" in
+        '') echo 'it has no host (expected e.g. mdm.example.com)'; return ;;
+        *[!A-Za-z0-9.-]*|.*|*.|-*|*-|*..*) echo "\"$host\" is not a host name or IPv4 address"; return ;;
+      esac ;;
+  esac
+  case "$port" in *[!0-9]*) echo "\"$hp\" does not end in a port number after the colon" ;; esac
+}
+
+# mdm_check_base_url VAR: checks the URL held in the variable named VAR. When it passes, VAR's scheme is rewritten in
+# lowercase (HTTPS://… becomes https://…; nothing else changes) and it succeeds. Otherwise it prints why to stderr,
+# leaves VAR alone and fails. It takes a variable name, not the value, so the caller's variable is normalised in place.
 mdm_check_base_url() {
-  local url=${!1-} rest='' hp host port why=''
+  local url=${!1-} rest='' bad='' why=''
   case "$url" in
-    *[[:cntrl:]]*)                why='it contains a control character (a tab, a newline or similar)' ;;
-    *[[:space:]]*)                why='it contains whitespace' ;;
-    *[\"\'\<\>\&]*)               why="it contains one of the characters \" ' < > &" ;;
-    [Hh][Tt][Tt][Pp]://*)         rest=${url#*://}; url="http://$rest" ;;
-    [Hh][Tt][Tt][Pp][Ss]://*)     rest=${url#*://}; url="https://$rest" ;;
-    *)                            why='it must start with http:// or https:// (e.g. https://mdm.example.com)' ;;
+    '')                             why='it is empty' ;;
+    *@*)                            why='it contains "@": a base URL takes no user name or password (user@host)' ;;
+    *\?*|*#*)                       why='it contains "?" or "#": a base URL takes no query or fragment' ;;
+    *%*)                            why='it contains "%": percent-escapes are not accepted in a base URL' ;;
+    *[!A-Za-z0-9._~:/+=,\[\]-]*)
+      bad=${url//[A-Za-z0-9._~:\/+=,\[\]-]/}; bad=${bad:0:1}
+      case "$bad" in \') bad="\"'\"" ;; [[:print:]]) bad="'$bad'" ;; *) bad=$(printf '%q' "$bad") ;; esac
+      why="it contains $bad, which is not allowed (only letters, digits and . _ ~ : / + = , [ ] -)" ;;
+    [Hh][Tt][Tt][Pp]://*)           rest=${url#*://}; url="http://$rest" ;;
+    [Hh][Tt][Tt][Pp][Ss]://*)       rest=${url#*://}; url="https://$rest" ;;
+    *)                              why='it must start with http:// or https:// (e.g. https://mdm.example.com)' ;;
   esac
   case "$rest" in
     [Hh][Tt][Tt][Pp]://*|[Hh][Tt][Tt][Pp][Ss]://*) why='it has the scheme twice (where a hostname is asked for, enter the name only)' ;;
   esac
-  if [ -z "$why" ]; then
-    hp=${rest%%[/?#]*}; hp=${hp##*@}; host=$hp; port=
-    case "$hp" in
-      *\]) ;;                                                           # [IPv6] with no port
-      *:*) host=${hp%:*}; port=${hp##*:}; [ -n "$port" ] || port=- ;;   # "-" marks an empty port: never valid
-    esac
-    case "$host" in
-      '')            why='it has no host after the scheme (expected e.g. https://mdm.example.com)' ;;
-      \[*\])         ;;
-      *:*|*\[*|*\]*) why="\"$hp\" is not a host or host:port" ;;
-    esac
-    if [ -z "$why" ]; then
-      case "$port" in *[!0-9]*) why="\"$hp\" does not end in a port number after the colon" ;; esac
-    fi
-  fi
+  [ -n "$why" ] || why=$(_mdm_hostport_problem "${rest%%/*}")
   if [ -z "$why" ]; then printf -v "$1" '%s' "$url"; return 0; fi
   url=${!1-}
-  case "$url" in *[[:cntrl:]]*) url=$(printf '%q' "$url") ;; esac   # shown as typed, unless that would garble the terminal
+  case "$url" in *[![:print:]]*) url=$(printf '%q' "$url") ;; esac   # shown as typed, unless that would garble the terminal
   printf 'Invalid public base URL %s: %s.\n' "${url:-(empty)}" "$why" >&2
   return 1
 }
+# <<< url.sh functions <<<
 
 command -v docker >/dev/null || { err "Docker is required."; exit 1; }
 docker compose version >/dev/null 2>&1 || { err "Docker Compose v2 is required ('docker compose')."; exit 1; }

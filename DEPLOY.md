@@ -70,11 +70,18 @@ The wizard asks how you want to expose it:
   DNS at the host first.
 
 The hostname you enter becomes `BASE_URL=https://<hostname>`, the public address that devices and the console use.
-The quick start (Option A), `setup.sh` and the native installer (Option C) check it before writing anything. It must be
-`http://` or `https://` (any letter case; it is stored in lowercase) followed by a host name, an IPv4 address or a
-`[bracketed]` IPv6 address, optionally with `:port` and a path, and contain no whitespace, no control characters and
-none of `"` `'` `<` `>` `&`. At a prompt that asks for the hostname, enter the name only (`mdm.example.com`). A re-run of
-`./setup.sh` checks the `BASE_URL` already in `.env` the same way, and rewrites an upper-case scheme there in lowercase.
+The quick start (Option A), `setup.sh` and the native installer (Option C) check it before writing anything. The rule is
+an allowlist (`install/lib/url.sh`):
+
+- `http://` or `https://`, in any letter case (it is stored in lowercase);
+- then a host name or IPv4 address (letters, digits, `.` and `-`), or a `[bracketed]` IPv6 address, optionally with
+  `:port`;
+- then optionally a path made of letters, digits and `. _ ~ : / + = , -`.
+
+Nothing else is accepted: no spaces, quotes, `$`, `\`, `;` or other shell characters, no `user@` part, no `?` query or
+`#` fragment, and no `%` escapes. At a prompt that asks for the hostname, enter the name only (`mdm.example.com`). A
+re-run of `./setup.sh` checks the `BASE_URL` already in `.env` the same way, and rewrites an upper-case scheme there in
+lowercase.
 
 It writes `.env` (gitignored), builds the images, brings the stack up, seeds the database, and prints
 the console URL and the generated **admin** password (shown once — save it, then change it in the UI).

@@ -135,19 +135,20 @@ jobs:
       # --- edge: the Cloudflare-mode Caddyfile break (empty ACME_EMAIL) shipped because nothing parsed it. Validates
       # docker/Caddyfile in every hosting mode with the caddy image web.Dockerfile builds FROM, and every compose combo;
       # then checks /healthz and /healthz/supervisor report their upstream's health (503, never the SPA's 200). ---
-      # quickstart.sh carries an inline copy of install/lib/url.sh's mdm_check_base_url: it runs from main but fetches
-      # install/lib from the release it installs, which may predate url.sh (see quickstart.sh). Fail when they differ.
+      # quickstart.sh carries a verbatim copy of install/lib/url.sh's functions (the region between the ">>> url.sh
+      # functions" and "<<< url.sh functions" markers): it runs from main but fetches install/lib from the release it
+      # installs, which may predate url.sh (see quickstart.sh). Fail when the copies differ.
       - if: matrix.name == 'edge' && (needs.paths.outputs.all == 'true' || fromJSON(needs.paths.outputs.matched).installers)
         name: quickstart.sh's BASE_URL check matches install/lib/url.sh
         run: |
-          fn() { sed -n '/^mdm_check_base_url() {$/,/^}$/p' "$1"; }
+          fn() { sed -n '/^# >>> url.sh functions /,/^# <<< url.sh functions <<<$/p' "$1"; }
           lib=$(fn install/lib/url.sh); qs=$(fn quickstart.sh)
           if [ -z "$lib" ] || [ "$lib" != "$qs" ]; then
-            echo "::error file=quickstart.sh::mdm_check_base_url in quickstart.sh is not a verbatim copy of install/lib/url.sh's (or one is missing). Copy the lib's function into quickstart.sh."
+            echo "::error file=quickstart.sh::the url.sh functions in quickstart.sh are not a verbatim copy of install/lib/url.sh's (or one is missing). Copy the region between the markers into quickstart.sh."
             diff -u <(printf '%s\n' "$lib") <(printf '%s\n' "$qs") || true
             exit 1
           fi
-          echo "quickstart.sh's mdm_check_base_url is identical to install/lib/url.sh's"
+          echo "quickstart.sh's url.sh functions are identical to install/lib/url.sh's"
       - if: matrix.name == 'edge' && (needs.paths.outputs.all == 'true' || fromJSON(needs.paths.outputs.matched).edge)
         name: Caddyfile modes + compose overlays
         run: scripts/edge-check.sh

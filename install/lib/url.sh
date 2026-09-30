@@ -1,51 +1,74 @@
 #!/usr/bin/env bash
-# Shared BASE_URL rule for the installers (setup.sh, install/install-native.sh; quickstart.sh keeps an identical inline
-# copy, see there). Source this file; do not execute it. bash 3.2 compatible (quickstart may run under macOS's bash).
+# Shared BASE_URL rule for the installers (setup.sh, install/install-native.sh; quickstart.sh keeps a verbatim copy of
+# the functions between the markers below, which CI checks). Source this file; do not execute it. bash 3.2 compatible
+# (quickstart may run under macOS's bash).
 #
-# BASE_URL is the public address devices and the console use. It is written into .env and into Tomcat's ROOT.xml as an
-# XML attribute value, and baked into the enrollment QR, so a typo or a stray character breaks the install in ways that
-# surface much later. It is checked when it is entered or read, and must be:
+# BASE_URL is the public address devices and the console use. It is written into .env, which three readers parse (bash
+# sourcing it in setup.sh, docker compose, and a person), into Tomcat's ROOT.xml as an XML attribute value, and into the
+# enrollment QR. So it is an ALLOWLIST, not a list of bad characters: anything a reader could expand, strip or execute
+# ($, `, \, ;, quotes, spaces, …) never gets in. A BASE_URL must be:
 #   - http:// or https://, in any letter case (RFC 3986: the scheme is case-insensitive); it is rewritten in lowercase;
-#   - then a host: a name, an IPv4 address or a [bracketed] IPv6 literal, optionally followed by :port (digits only);
-#   - free of whitespace, control characters and the characters " ' < > &.
-# Not checked: the path (a /path is allowed as it is, "." and ".." segments included), the host's own syntax beyond the
-# above (e.g. a label that starts with "-"), and the port's range. This only validates: escaping the values written into
+#   - then a host: a name or IPv4 address (letters, digits, "." and "-"; not starting or ending with "." or "-", no
+#     ".."), or a [bracketed] IPv6 address (hex digits, ":" and "."), optionally followed by :port (digits);
+#   - then optionally a /path of letters, digits and . _ ~ : / + = , -
+# Refused outright: user info (user@host), a query (?) or fragment (#), and "%" (percent-escapes are not accepted; a
+# base URL has no need for them).
+# Not checked: "." and ".." path segments (a /path is used as it is), each host label's own syntax, the IPv6 address
+# beyond its characters and colons, and the port's range. This only validates: escaping the values written into
 # ROOT.xml is a separate job, done where they are written.
+
+# >>> url.sh functions (quickstart.sh keeps a verbatim copy) >>>
+# _mdm_hostport_problem HOSTPORT: prints why HOSTPORT is not host[:port] as described above; prints nothing when it is.
+_mdm_hostport_problem() {
+  local hp=$1 host='' port='' v6=''
+  case "$hp" in
+    \[*)
+      v6=${hp#\[}
+      case "$v6" in *\]*) ;; *) echo "\"$hp\" has no closing ]"; return ;; esac
+      port=${v6#*\]}; v6=${v6%%\]*}
+      case "$v6" in
+        ''|*[!0-9A-Fa-f:.]*|*:::*|*::*::*|*:*:*:*:*:*:*:*:*) echo "\"[$v6]\" is not an IPv6 address"; return ;;
+        *:*) ;;
+        *) echo "\"[$v6]\" is not an IPv6 address"; return ;;
+      esac
+      case "$port" in '') return ;; :*) port=${port#:}; [ -n "$port" ] || port=- ;; *) echo "\"$hp\": only :port may follow ]"; return ;; esac ;;
+    *)
+      host=${hp%%:*}
+      case "$hp" in *:*) port=${hp#*:}; [ -n "$port" ] || port=- ;; esac
+      case "$host" in
+        '') echo 'it has no host (expected e.g. mdm.example.com)'; return ;;
+        *[!A-Za-z0-9.-]*|.*|*.|-*|*-|*..*) echo "\"$host\" is not a host name or IPv4 address"; return ;;
+      esac ;;
+  esac
+  case "$port" in *[!0-9]*) echo "\"$hp\" does not end in a port number after the colon" ;; esac
+}
 
 # mdm_check_base_url VAR: checks the URL held in the variable named VAR. When it passes, VAR's scheme is rewritten in
 # lowercase (HTTPS://… becomes https://…; nothing else changes) and it succeeds. Otherwise it prints why to stderr,
 # leaves VAR alone and fails. It takes a variable name, not the value, so the caller's variable is normalised in place.
 mdm_check_base_url() {
-  local url=${!1-} rest='' hp host port why=''
+  local url=${!1-} rest='' bad='' why=''
   case "$url" in
-    *[[:cntrl:]]*)                why='it contains a control character (a tab, a newline or similar)' ;;
-    *[[:space:]]*)                why='it contains whitespace' ;;
-    *[\"\'\<\>\&]*)               why="it contains one of the characters \" ' < > &" ;;
-    [Hh][Tt][Tt][Pp]://*)         rest=${url#*://}; url="http://$rest" ;;
-    [Hh][Tt][Tt][Pp][Ss]://*)     rest=${url#*://}; url="https://$rest" ;;
-    *)                            why='it must start with http:// or https:// (e.g. https://mdm.example.com)' ;;
+    '')                             why='it is empty' ;;
+    *@*)                            why='it contains "@": a base URL takes no user name or password (user@host)' ;;
+    *\?*|*#*)                       why='it contains "?" or "#": a base URL takes no query or fragment' ;;
+    *%*)                            why='it contains "%": percent-escapes are not accepted in a base URL' ;;
+    *[!A-Za-z0-9._~:/+=,\[\]-]*)
+      bad=${url//[A-Za-z0-9._~:\/+=,\[\]-]/}; bad=${bad:0:1}
+      case "$bad" in \') bad="\"'\"" ;; [[:print:]]) bad="'$bad'" ;; *) bad=$(printf '%q' "$bad") ;; esac
+      why="it contains $bad, which is not allowed (only letters, digits and . _ ~ : / + = , [ ] -)" ;;
+    [Hh][Tt][Tt][Pp]://*)           rest=${url#*://}; url="http://$rest" ;;
+    [Hh][Tt][Tt][Pp][Ss]://*)       rest=${url#*://}; url="https://$rest" ;;
+    *)                              why='it must start with http:// or https:// (e.g. https://mdm.example.com)' ;;
   esac
   case "$rest" in
     [Hh][Tt][Tt][Pp]://*|[Hh][Tt][Tt][Pp][Ss]://*) why='it has the scheme twice (where a hostname is asked for, enter the name only)' ;;
   esac
-  if [ -z "$why" ]; then
-    hp=${rest%%[/?#]*}; hp=${hp##*@}; host=$hp; port=
-    case "$hp" in
-      *\]) ;;                                                           # [IPv6] with no port
-      *:*) host=${hp%:*}; port=${hp##*:}; [ -n "$port" ] || port=- ;;   # "-" marks an empty port: never valid
-    esac
-    case "$host" in
-      '')            why='it has no host after the scheme (expected e.g. https://mdm.example.com)' ;;
-      \[*\])         ;;
-      *:*|*\[*|*\]*) why="\"$hp\" is not a host or host:port" ;;
-    esac
-    if [ -z "$why" ]; then
-      case "$port" in *[!0-9]*) why="\"$hp\" does not end in a port number after the colon" ;; esac
-    fi
-  fi
+  [ -n "$why" ] || why=$(_mdm_hostport_problem "${rest%%/*}")
   if [ -z "$why" ]; then printf -v "$1" '%s' "$url"; return 0; fi
   url=${!1-}
-  case "$url" in *[[:cntrl:]]*) url=$(printf '%q' "$url") ;; esac   # shown as typed, unless that would garble the terminal
+  case "$url" in *[![:print:]]*) url=$(printf '%q' "$url") ;; esac   # shown as typed, unless that would garble the terminal
   printf 'Invalid public base URL %s: %s.\n' "${url:-(empty)}" "$why" >&2
   return 1
 }
+# <<< url.sh functions <<<
