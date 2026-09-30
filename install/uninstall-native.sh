@@ -82,7 +82,15 @@ fi
 # 1. Final backup — cheap insurance even when --keep-data (the dump is the portable copy).
 if [ "$BACKUP" = 1 ] && db_exists; then
   DUMP="/root/mdmesh-final-$(date +%Y%m%d-%H%M%S).dump"
-  as_postgres pg_dump -Fc mdmesh > "$DUMP" && chmod 600 "$DUMP" && echo "  ✓ final dump: $DUMP  (restore: pg_restore -c -d mdmesh $DUMP)"
+  # A plain `pg_dump > "$DUMP" && …` list would not stop the script: set -e ignores a failure anywhere but the last
+  # command of an && list, so a failed dump went on to drop the database. (umask 077 above: the file is created 600.)
+  if ! as_postgres pg_dump -Fc mdmesh > "$DUMP"; then
+    rm -f "$DUMP"
+    echo "  ✗ final dump failed — nothing removed (fix it, or re-run with --no-backup to uninstall without a dump)"
+    exit 1
+  fi
+  chmod 600 "$DUMP"
+  echo "  ✓ final dump: $DUMP  (restore: pg_restore -c -d mdmesh $DUMP)"
 fi
 
 # 2. Stop Tomcat for good: the systemd unit first (cgroup-tracked), then legacy fallbacks for Tomcats
