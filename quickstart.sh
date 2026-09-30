@@ -31,6 +31,11 @@ latest_release() {
 # of the functions between the markers, not a download: this script runs from main but fetches install/lib from the
 # release it installs, which may predate url.sh (see db.sh below). CI (t0-fast, edge entry) fails if the copies differ.
 # >>> url.sh functions (quickstart.sh keeps a verbatim copy) >>>
+# The character sets, spelled out: a range such as [A-Za-z0-9] follows the locale's collation, and under en_US.UTF-8
+# bash matches thousands of non-ASCII letters with it (https://ｅxample.com would pass).
+_MDM_ALNUM=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
+_MDM_HEX=0123456789ABCDEFabcdef
+_MDM_DIGITS=0123456789
 # _mdm_hostport_problem HOSTPORT: prints why HOSTPORT is not host[:port] as described above; prints nothing when it is.
 _mdm_hostport_problem() {
   local hp=$1 host='' port='' v6=''
@@ -40,7 +45,7 @@ _mdm_hostport_problem() {
       case "$v6" in *\]*) ;; *) echo "\"$hp\" has no closing ]"; return ;; esac
       port=${v6#*\]}; v6=${v6%%\]*}
       case "$v6" in
-        ''|*[!0-9A-Fa-f:.]*|*:::*|*::*::*|*:*:*:*:*:*:*:*:*) echo "\"[$v6]\" is not an IPv6 address"; return ;;
+        ''|*[!${_MDM_HEX}:.]*|*:::*|*::*::*|*:*:*:*:*:*:*:*:*) echo "\"[$v6]\" is not an IPv6 address"; return ;;
         *:*) ;;
         *) echo "\"[$v6]\" is not an IPv6 address"; return ;;
       esac
@@ -50,10 +55,10 @@ _mdm_hostport_problem() {
       case "$hp" in *:*) port=${hp#*:}; [ -n "$port" ] || port=- ;; esac
       case "$host" in
         '') echo 'it has no host (expected e.g. mdm.example.com)'; return ;;
-        *[!A-Za-z0-9.-]*|.*|*.|-*|*-|*..*) echo "\"$host\" is not a host name or IPv4 address"; return ;;
+        *[!${_MDM_ALNUM}.-]*|.*|*.|-*|*-|*..*) echo "\"$host\" is not a host name or IPv4 address"; return ;;
       esac ;;
   esac
-  case "$port" in *[!0-9]*) echo "\"$hp\" does not end in a port number after the colon" ;; esac
+  case "$port" in *[!${_MDM_DIGITS}]*) echo "\"$hp\" does not end in a port number after the colon" ;; esac
 }
 
 # mdm_check_base_url VAR: checks the URL held in the variable named VAR. When it passes, VAR's scheme is rewritten in
@@ -66,8 +71,8 @@ mdm_check_base_url() {
     *@*)                            why='it contains "@": a base URL takes no user name or password (user@host)' ;;
     *\?*|*#*)                       why='it contains "?" or "#": a base URL takes no query or fragment' ;;
     *%*)                            why='it contains "%": percent-escapes are not accepted in a base URL' ;;
-    *[!A-Za-z0-9._:/+=,\[\]-]*)
-      bad=${url//[A-Za-z0-9._:\/+=,\[\]-]/}; bad=${bad:0:1}
+    *[!${_MDM_ALNUM}._:/+=,\[\]-]*)
+      bad=${url//[${_MDM_ALNUM}._:\/+=,\[\]-]/}; bad=${bad:0:1}
       case "$bad" in \') bad="\"'\"" ;; [[:print:]]) bad="'$bad'" ;; *) bad=$(printf '%q' "$bad") ;; esac
       why="it contains $bad, which is not allowed (only letters, digits and . _ : / + = , [ ] -)" ;;
     [Hh][Tt][Tt][Pp]://*)           rest=${url#*://}; url="http://$rest" ;;
@@ -93,8 +98,8 @@ mdm_check_host() {
     '')                 why='it is empty' ;;
     *://*)              why='enter the name only, without http:// or https://' ;;
     */*|*\?*|*#*|*@*)   why='enter the name only: no /path, ?query, #fragment or user@' ;;
-    *[!A-Za-z0-9.:\[\]-]*)
-      bad=${h//[A-Za-z0-9.:\[\]-]/}; bad=${bad:0:1}
+    *[!${_MDM_ALNUM}.:\[\]-]*)
+      bad=${h//[${_MDM_ALNUM}.:\[\]-]/}; bad=${bad:0:1}
       case "$bad" in \') bad="\"'\"" ;; [[:print:]]) bad="'$bad'" ;; *) bad=$(printf '%q' "$bad") ;; esac
       why="it contains $bad, which is not allowed (only letters, digits, . and -, or an [IPv6] address, then an optional :port)" ;;
   esac
