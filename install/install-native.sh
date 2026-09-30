@@ -19,7 +19,8 @@ REPO="$PWD"   # repo root — used for absolute paths inside subshells (e.g. exp
 . "$REPO/install/lib/version.sh"
 # shellcheck source=lib/url.sh
 . "$REPO/install/lib/url.sh"
-# as_svc_user / as_postgres: commands as the service account or postgres, isolated from root's environment and terminal.
+# as_svc_user / as_postgres / as_mdmesh_role: the service account, postgres (superuser-only statements, in the postgres
+# database), or the mdmesh role (anything reading the mdmesh database), isolated from root's environment and terminal.
 # shellcheck source=lib/runas.sh
 . "$REPO/install/lib/runas.sh"
 
@@ -281,7 +282,7 @@ svc_cat() {
     cat -- "$1"
   fi
 }
-# as_svc_user (run Tomcat's scripts as $SVC_USER) and as_postgres (psql/pg_dump as postgres) are in lib/runas.sh.
+# as_svc_user (Tomcat's scripts as $SVC_USER), as_postgres and as_mdmesh_role (database clients) are in lib/runas.sh.
 port_holder() {
   if command -v ss >/dev/null 2>&1; then ss -ltnp 2>/dev/null | awk -v p=":$HTTP_PORT$" '$4 ~ p {print; exit}'
   elif command -v lsof >/dev/null 2>&1; then lsof -iTCP:"$HTTP_PORT" -sTCP:LISTEN -nP 2>/dev/null | awk 'NR==2{print; exit}'; fi
@@ -700,8 +701,9 @@ if [ "$SEED" = no ]; then
   # their own .mdmesh-tmp. names only (as in write_under).
   rm -f "$BK_DIR"/.mdmesh-pre-upgrade-*.dump.mdmesh-tmp.??????
   _bk_tmp=$(mktemp "$BK_DIR/.${BK##*/}.mdmesh-tmp.XXXXXX")
-  # Root opens the output file (a root-owned mktemp file); the postgres account only writes the dump stream to it.
-  if as_postgres pg_dump -Fc mdmesh > "$_bk_tmp" 2>>"$LOGFILE" && mv -fT "$_bk_tmp" "$BK"; then
+  # Dumped as the mdmesh role, not as the postgres superuser (as_mdmesh_role in lib/runas.sh says why); root opens the
+  # output file (a root-owned mktemp file).
+  if as_mdmesh_role "$DB_PASSWORD" pg_dump -Fc > "$_bk_tmp" 2>>"$LOGFILE" && mv -fT "$_bk_tmp" "$BK"; then
     ok "pg_dump written: $BK  (restore: pg_restore -c -d mdmesh $BK)"
   else
     rm -f "$_bk_tmp"

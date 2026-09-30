@@ -14,7 +14,8 @@ set -euo pipefail
 umask 077
 export PATH="/usr/sbin:/sbin:$PATH"   # useradd/userdel/pg tools live here; not every root shell has it
 [ "$(id -u)" = "0" ] || { echo "Run as root (sudo)."; exit 1; }
-# as_svc_user / as_postgres, shared with install-native.sh: commands as the service account or postgres, isolated from
+# as_svc_user / as_postgres / as_mdmesh_role, shared with install-native.sh: the service account, postgres (superuser-only
+# statements, in the postgres database), or the mdmesh role (anything reading the mdmesh database), isolated from
 # root's environment and terminal.
 # shellcheck source=lib/runas.sh
 . "$(cd "$(dirname "$0")" && pwd)/lib/runas.sh"
@@ -50,9 +51,18 @@ svc_user_pids() {
   done
 }
 db_exists() { as_postgres psql -X -tAc "SELECT 1 FROM pg_database WHERE datname='mdmesh'" 2>/dev/null | grep -q 1; }
+# The mdmesh role's password, from the installed ROOT.xml, read as $SVC_USER (the file is in that account's tree; see
+# svc_cat in install-native.sh); empty when it cannot be read. Everything below that reads the mdmesh database connects
+# as that role (as_mdmesh_role), never as the postgres superuser: see lib/runas.sh for why.
+DB_PW=$(as_svc_user cat -- "$CATALINA/conf/Catalina/localhost/ROOT.xml" 2>/dev/null \
+        | sed -n 's/.*name="JDBC.password"[[:space:]]*value="\([^"]*\)".*/\1/p' | head -n 1) || DB_PW=""
 counts=""
 if db_exists; then
-  counts=$(as_postgres psql -X -d mdmesh -tAc "SELECT (SELECT count(*) FROM devices)||' device(s), '||(SELECT count(*) FROM configurations)||' configuration(s), '||(SELECT count(*) FROM users)||' user(s)'" 2>/dev/null || echo "unreadable")
+  if [ -z "$DB_PW" ]; then
+    counts="unreadable (no database password in ROOT.xml)"
+  else
+    counts=$(as_mdmesh_role "$DB_PW" psql -X -tAc "SELECT (SELECT count(*) FROM devices)||' device(s), '||(SELECT count(*) FROM configurations)||' configuration(s), '||(SELECT count(*) FROM users)||' user(s)'" 2>/dev/null || echo "unreadable")
+  fi
 fi
 
 echo
@@ -84,7 +94,12 @@ if [ "$BACKUP" = 1 ] && db_exists; then
   DUMP="/root/mdmesh-final-$(date +%Y%m%d-%H%M%S).dump"
   # A plain `pg_dump > "$DUMP" && …` list would not stop the script: set -e ignores a failure anywhere but the last
   # command of an && list, so a failed dump went on to drop the database. (umask 077 above: the file is created 600.)
-  if ! as_postgres pg_dump -Fc mdmesh > "$DUMP"; then
+  if [ -z "$DB_PW" ]; then
+    echo "  ✗ final dump failed: the database password could not be read from ROOT.xml — nothing removed (re-run with"
+    echo "    --no-backup to uninstall without a dump)"
+    exit 1
+  fi
+  if ! as_mdmesh_role "$DB_PW" pg_dump -Fc > "$DUMP"; then
     rm -f "$DUMP"
     echo "  ✗ final dump failed — nothing removed (fix it, or re-run with --no-backup to uninstall without a dump)"
     exit 1
