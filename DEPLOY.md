@@ -70,18 +70,24 @@ The wizard asks how you want to expose it:
   DNS at the host first.
 
 The hostname you enter becomes `BASE_URL=https://<hostname>`, the public address that devices and the console use.
-The quick start (Option A), `setup.sh` and the native installer (Option C) check it before writing anything. The rule is
-an allowlist (`install/lib/url.sh`):
+It is checked as soon as it is entered or read: `setup.sh` checks it before writing `.env`, the quick start (Option A)
+before downloading anything (it has only created its `./mdmesh` directory), and the native installer (Option C) before
+it installs or changes anything on the host (it has only started its log file). The rule is an allowlist
+(`install/lib/url.sh`):
 
 - `http://` or `https://`, in any letter case (it is stored in lowercase);
-- then a host name or IPv4 address (letters, digits, `.` and `-`), or a `[bracketed]` IPv6 address, optionally with
-  `:port`;
+- then a host name or IPv4 address (letters, digits, `.` and `-`, not starting or ending with `.` or `-`, no `..`), or
+  a `[bracketed]` IPv6 address, optionally with `:port`;
 - then optionally a path made of letters, digits and `. _ ~ : / + = , -`.
 
 Nothing else is accepted: no spaces, quotes, `$`, `\`, `;` or other shell characters, no `user@` part, no `?` query or
-`#` fragment, and no `%` escapes. At a prompt that asks for the hostname, enter the name only (`mdm.example.com`). A
-re-run of `./setup.sh` checks the `BASE_URL` already in `.env` the same way, and rewrites an upper-case scheme there in
-lowercase.
+`#` fragment, and no `%` escapes.
+
+The hostname prompts of `setup.sh` and the quick start take the host alone: a name or IPv4 address (letters, digits,
+`.` and `-`, not starting or ending with `.` or `-`), or a `[bracketed]` IPv6 address, optionally with `:port` (e.g.
+`mdm.example.com` or `mdm.example.com:8443`), and no `https://`, path, `user@`, `?` or `#`. In own-domain mode it is
+also the address Caddy serves and gets a certificate for. A re-run of `./setup.sh` checks the `BASE_URL` already in
+`.env` by the rule above, and rewrites an upper-case scheme there in lowercase.
 
 It writes `.env` (gitignored), builds the images, brings the stack up, seeds the database, and prints
 the console URL and the generated **admin** password (shown once — save it, then change it in the UI).
@@ -124,10 +130,12 @@ opt into a wipe, `HTTP_PORT=9090` to pick the port. Only missing packages are in
 **The agent APK.** The installer fetches the latest release's agent APK, hosts it at `/files/agent.apk` and bakes its
 signing checksum into the console's enrollment QR. It trusts the APK only through the release's signed manifest, like
 the supervisor does: `manifest.json` must verify with `minisign` against the repo's `release/minisign.pub` before its
-checksum and SHA-256 are read, and the downloaded APK must match that SHA-256. If there is no release yet, the release
-has no `manifest.json.minisig`, the signature does not verify, `minisign` is unavailable, a download fails or the APK
-does not match, the install still completes. It prints which of these happened, and the console keeps its debug
-defaults: host an APK at `/files/agent.apk` yourself, or re-run the installer once a verified release exists.
+checksum and SHA-256 are read, the manifest's version must be the release's own tag (so an older release's signed
+manifest cannot stand in for it), and the downloaded APK must match that SHA-256. If there is no release yet, the
+release has no `manifest.json.minisig`, `minisign` or the `release/minisign.pub` key is missing, the signature does not
+verify, the manifest belongs to another release, a download fails or the APK does not match, the install still
+completes. It prints which of these happened, and the console keeps its debug defaults: host an APK at
+`/files/agent.apk` yourself, or re-run the installer once a verified release exists.
 
 Tomcat runs as the unprivileged `mdmesh` system user under systemd (`mdmesh-server.service`, enabled at boot).
 Manage it like any other service:
