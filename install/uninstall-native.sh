@@ -58,7 +58,10 @@ db_exists() { as_postgres psql -X -tAc "SELECT 1 FROM pg_database WHERE datname=
 # The mdmesh role's password, from the installed ROOT.xml, read as $SVC_USER (the file is in that account's tree; see
 # svc_cat in install-native.sh); empty when it cannot be read. Everything below that reads the mdmesh database connects
 # as that role (as_mdmesh_role), never as the postgres superuser: see lib/runas.sh for why.
-DB_PW=$(as_svc_user cat -- "$CATALINA/conf/Catalina/localhost/ROOT.xml" 2>/dev/null \
+# Read as a REGULAR file only and bounded to 64 KiB (see svc_cat in install-native.sh): a FIFO here would hang the
+# uninstaller, a symlink to /dev/zero would read forever.
+# shellcheck disable=SC2016  # $1 is the inner sh's positional (the ROOT.xml path), not a variable to expand here
+DB_PW=$(as_svc_user sh -c '[ -f "$1" ] && head -c 65536 -- "$1"' _ "$CATALINA/conf/Catalina/localhost/ROOT.xml" 2>/dev/null \
         | sed -n 's/.*name="JDBC.password"[[:space:]]*value="\([^"]*\)".*/\1/p' | head -n 1) || DB_PW=""
 # n_or_q RESULT: RESULT when it is a plain non-negative integer, else "?". The counts print to root's terminal, and the
 # mdmesh role owns these relations (and its search_path), so it must not slip control bytes into that summary; count(*)

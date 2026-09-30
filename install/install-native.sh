@@ -280,11 +280,15 @@ refuse_svc_user_jobs() {
 # svc_cat FILE: FILE's contents, read as $SVC_USER. For files in the trees that account owns: root would follow a link
 # planted there and read any root-only file. Before the account exists (a fresh install, or an upgrade from a version
 # whose Tomcat ran as root) nothing unprivileged owns those trees, so root reads them.
+# It reads a REGULAR file only ([ -f ] rejects a FIFO, which cat would block on forever, and a symlink to a device such
+# as /dev/zero, which would read without end) and at most 64 KiB (these config files are far smaller). Fails (empty, rc 1)
+# when the path is missing or not a regular file, which callers already treat as "cannot read".
 svc_cat() {
   if id -u "$SVC_USER" >/dev/null 2>&1; then
-    as_svc_user cat -- "$1"
+    # shellcheck disable=SC2016  # $1 is the inner sh's positional (the path), not a variable to expand here
+    as_svc_user sh -c '[ -f "$1" ] && head -c 65536 -- "$1"' _ "$1"
   else
-    cat -- "$1"
+    [ -f "$1" ] && head -c 65536 -- "$1"
   fi
 }
 # as_svc_user (Tomcat's scripts as $SVC_USER), as_postgres and as_mdmesh_role (database clients) are in lib/runas.sh.
