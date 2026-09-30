@@ -509,8 +509,17 @@ step "Fetching the agent APK from GitHub Releases"
 # provisioning QR matches the hosted APK. Anonymous once the repo is public; honours GITHUB_TOKEN if set.
 # Graceful: if there's no release yet (or it's still private/unreachable), the install continues with
 # debug defaults and you host an APK manually — enrollment just needs a matching APK at /files/agent.apk.
+# The APK is trusted only through the release's signed manifest, as the supervisor does: manifest.json must verify with
+# minisign against release/minisign.pub before its checksum and sha256 are read, and the APK must match that sha256.
+# Anything less (no signature, a bad one, no minisign, a failed download, a mismatch) is refused, with its own message.
 GITHUB_REPO="${GITHUB_REPO:-$(git remote get-url origin 2>/dev/null | sed -E 's#(git@|https?://)[^/:]+[/:]##; s#\.git$##')}"
 AGENT_APK=""
+# The manifest, its signature and the APK are fetched into one private directory (mktemp -d). The deploy step removes it
+# once the APK is hosted; this EXIT trap removes it on every other way the run ends (_fail, an error under set -e, a
+# signal). It adds an EXIT trap only: the ERR trap above is unchanged and still reports an abort first.
+AGENT_FETCH_DIR=""
+agent_fetch_cleanup() { if [ -n "$AGENT_FETCH_DIR" ]; then rm -rf -- "$AGENT_FETCH_DIR"; AGENT_FETCH_DIR=""; fi; }
+trap agent_fetch_cleanup EXIT
 if [ -n "$GITHUB_REPO" ]; then
   # gh_curl ARGS...: curl, sending GITHUB_TOKEN (when set) as an Authorization header read from stdin (-H @-, curl 7.55+),
   # never on curl's command line, which every local user can read (ps, /proc/<pid>/cmdline).
@@ -524,24 +533,51 @@ if [ -n "$GITHUB_REPO" ]; then
   jget() { python3 -c 'import sys,json;
 d=json.load(sys.stdin)
 def asset(n): return next((a["browser_download_url"] for a in d.get("assets",[]) if a["name"]==n),"")
-print({"apk":asset("mdmesh-agent.apk"),"manifest":asset("manifest.json")}.get(sys.argv[1],""))' "$1" 2>/dev/null || true; }
-  REL=$(gh_curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>>"$LOGFILE" || true)
-  APK_URL=$(printf '%s' "$REL" | jget apk); MAN_URL=$(printf '%s' "$REL" | jget manifest)
-  if [ -n "$APK_URL" ] && [ -n "$MAN_URL" ]; then
-    MAN=$(gh_curl -fsSL "$MAN_URL" 2>>"$LOGFILE" || true)
-    AGENT_CK=$(printf '%s' "$MAN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["components"]["apk"]["signatureChecksum"])' 2>/dev/null || true)
-    WANT_SHA=$(printf '%s' "$MAN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["components"]["apk"]["sha256"])' 2>/dev/null || true)
-    TMP_APK=$(mktemp)
-    if gh_curl -fsSL "$APK_URL" -o "$TMP_APK" 2>>"$LOGFILE" && [ -n "$AGENT_CK" ] \
-       && [ "$(sha256sum "$TMP_APK" | awk '{print $1}')" = "$WANT_SHA" ]; then
-      AGENT_APK="$TMP_APK"
-      export VITE_AGENT_PACKAGE="com.mdmesh.agent" VITE_AGENT_CHECKSUM="$AGENT_CK" VITE_AGENT_APK_URL="/files/agent.apk"
-      ok "release agent APK fetched + sha256-verified (checksum ${AGENT_CK})"
-    else
-      info "Could not fetch/verify the release APK — continuing; host one at /files/agent.apk manually"
+print({"apk":asset("mdmesh-agent.apk"),"manifest":asset("manifest.json"),
+       "signature":asset("manifest.json.minisig")}.get(sys.argv[1],""))' "$1" 2>/dev/null || true; }
+  # manifest_apk FIELD FILE: components.apk.FIELD of the manifest FILE; empty when it has none.
+  manifest_apk() { python3 -c 'import sys,json;print(json.load(open(sys.argv[2]))["components"]["apk"][sys.argv[1]])' "$1" "$2" 2>/dev/null || true; }
+  # fetch_agent_apk: sets AGENT_APK (and AGENT_CK) when the latest release's APK verifies as described above; otherwise
+  # says why in one line and leaves AGENT_APK empty. Always returns 0, so set -e still stops the run on anything else.
+  fetch_agent_apk() {
+    local rel apk_url man_url sig_url d want_sha soft=" — console uses debug defaults; host /files/agent.apk manually"
+    AGENT_CK=""
+    rel=$(gh_curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>>"$LOGFILE" || true)
+    apk_url=$(printf '%s' "$rel" | jget apk); man_url=$(printf '%s' "$rel" | jget manifest)
+    sig_url=$(printf '%s' "$rel" | jget signature)
+    if [ -z "$apk_url" ] || [ -z "$man_url" ]; then info "No published release found for ${GITHUB_REPO}${soft}"; return; fi
+    if [ -z "$sig_url" ]; then
+      info "The latest release of ${GITHUB_REPO} has no manifest signature (manifest.json.minisig), so its APK is not trusted${soft}"; return
     fi
+    if ! command -v minisign >/dev/null 2>&1; then
+      info "minisign is unavailable, so the release manifest cannot be verified and its APK is not trusted${soft}"; return
+    fi
+    AGENT_FETCH_DIR=$(mktemp -d); d=$AGENT_FETCH_DIR
+    if ! gh_curl -fsSL "$man_url" -o "$d/manifest.json" 2>>"$LOGFILE" \
+       || ! gh_curl -fsSL "$sig_url" -o "$d/manifest.json.minisig" 2>>"$LOGFILE"; then
+      info "Could not download the release manifest or its signature (details in $LOGFILE)${soft}"; return
+    fi
+    if ! minisign -V -p "$REPO/release/minisign.pub" -m "$d/manifest.json" >> "$LOGFILE" 2>&1; then
+      info "The release manifest's signature is invalid (it does not verify with release/minisign.pub), so its APK is not trusted${soft}"; return
+    fi
+    AGENT_CK=$(manifest_apk signatureChecksum "$d/manifest.json"); want_sha=$(manifest_apk sha256 "$d/manifest.json")
+    if [ -z "$AGENT_CK" ] || [ -z "$want_sha" ]; then
+      AGENT_CK=""; info "The signed release manifest names no agent APK checksum or sha256${soft}"; return
+    fi
+    if ! gh_curl -fsSL "$apk_url" -o "$d/agent.apk" 2>>"$LOGFILE"; then
+      AGENT_CK=""; info "Could not download the release APK (details in $LOGFILE)${soft}"; return
+    fi
+    if [ "$(sha256sum "$d/agent.apk" | awk '{print $1}')" != "$want_sha" ]; then
+      AGENT_CK=""; info "The downloaded APK does not match the sha256 in the signed manifest, so it is not trusted${soft}"; return
+    fi
+    AGENT_APK="$d/agent.apk"
+  }
+  fetch_agent_apk
+  if [ -n "$AGENT_APK" ]; then
+    export VITE_AGENT_PACKAGE="com.mdmesh.agent" VITE_AGENT_CHECKSUM="$AGENT_CK" VITE_AGENT_APK_URL="/files/agent.apk"
+    ok "release agent APK fetched: manifest signature verified, sha256 matches (checksum ${AGENT_CK})"
   else
-    info "No published release found for ${GITHUB_REPO} — console uses debug defaults; host /files/agent.apk manually"
+    agent_fetch_cleanup
   fi
 else
   info "No GitHub repo detected — skipping release fetch; host /files/agent.apk manually"
@@ -619,6 +655,7 @@ while IFS= read -r -d '' _email; do
 done < <(find "$REPO/install/emails" -type f -print0)
 # Host the release agent APK the QR points at (/files/agent.apk), if we fetched one above.
 [ -n "$AGENT_APK" ] && { base_write files/agent.apk cat "$AGENT_APK"; ok "agent APK hosted at /files/agent.apk"; }
+agent_fetch_cleanup   # the fetched release files are no longer needed (the EXIT trap covers every other path)
 # ROOT.xml carries the DB password, hash.secret and jwt.secretkey: tc_write makes it mode 600.
 tc_write conf/Catalina/localhost/ROOT.xml cat <<XML
 <?xml version="1.0" encoding="UTF-8"?>

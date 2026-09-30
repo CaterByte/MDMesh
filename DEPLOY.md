@@ -103,6 +103,14 @@ to `/opt/mdmesh/backups/` first. Unattended: `sudo ./setup.sh --native -y` never
 opt into a wipe, `HTTP_PORT=9090` to pick the port. Only missing packages are installed, and a JDK 17 found via
 `JAVA17_HOME` or under `/opt` is used as-is (Debian 13 ships no `openjdk-17-jdk`).
 
+**The agent APK.** The installer fetches the latest release's agent APK, hosts it at `/files/agent.apk` and bakes its
+signing checksum into the console's enrollment QR. It trusts the APK only through the release's signed manifest, like
+the supervisor does: `manifest.json` must verify with `minisign` against the repo's `release/minisign.pub` before its
+checksum and SHA-256 are read, and the downloaded APK must match that SHA-256. If there is no release yet, the release
+has no `manifest.json.minisig`, the signature does not verify, `minisign` is unavailable, a download fails or the APK
+does not match, the install still completes. It prints which of these happened, and the console keeps its debug
+defaults: host an APK at `/files/agent.apk` yourself, or re-run the installer once a verified release exists.
+
 Tomcat runs as the unprivileged `mdmesh` system user under systemd (`mdmesh-server.service`, enabled at boot).
 Manage it like any other service:
 
