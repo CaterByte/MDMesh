@@ -46,7 +46,14 @@ _mdm_hostport_problem() {
         *[!${_MDM_ALNUM}.-]*|.*|*.|-*|*-|*..*) echo "\"$host\" is not a host name or IPv4 address"; return ;;
       esac ;;
   esac
-  case "$port" in *[!${_MDM_DIGITS}]*) echo "\"$hp\" does not end in a port number after the colon" ;; esac
+  case "$port" in
+    '') ;;                                                                     # no port
+    *[!${_MDM_DIGITS}]*) echo "\"$hp\" does not end in a port number after the colon"; return ;;
+    0*) echo "\"$hp\" has an invalid port (a port is 1-65535, with no leading zero)"; return ;;
+  esac
+  # Length first, so the numeric compare never sees a value too big for the shell's integer.
+  [ -z "$port" ] || { [ "${#port}" -le 5 ] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; } \
+    || echo "\"$hp\" has a port outside 1-65535"
 }
 
 # mdm_check_base_url VAR: checks the URL held in the variable named VAR. When it passes, VAR's scheme is rewritten in
