@@ -78,9 +78,9 @@ it installs or changes anything on the host (it has only started its log file). 
 - `http://` or `https://`, in any letter case (it is stored in lowercase);
 - then a host name or IPv4 address (letters, digits, `.` and `-`, not starting or ending with `.` or `-`, no `..`), or
   a `[bracketed]` IPv6 address, optionally with `:port`;
-- then optionally a path made of letters, digits and `. _ ~ : / + = , -`.
+- then optionally a path made of letters, digits and `. _ : / + = , -`.
 
-Nothing else is accepted: no spaces, quotes, `$`, `\`, `;` or other shell characters, no `user@` part, no `?` query or
+Nothing else is accepted: no spaces, quotes, `$`, `\`, `;`, `~` or other shell characters, no `user@` part, no `?` query or
 `#` fragment, and no `%` escapes.
 
 The hostname prompts of `setup.sh` and the quick start take the host alone: a name or IPv4 address (letters, digits,

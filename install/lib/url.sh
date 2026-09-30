@@ -10,7 +10,8 @@
 #   - http:// or https://, in any letter case (RFC 3986: the scheme is case-insensitive); it is rewritten in lowercase;
 #   - then a host: a name or IPv4 address (letters, digits, "." and "-"; not starting or ending with "." or "-", no
 #     ".."), or a [bracketed] IPv6 address (hex digits, ":" and "."), optionally followed by :port (digits);
-#   - then optionally a /path of letters, digits and . _ ~ : / + = , -
+#   - then optionally a /path of letters, digits and . _ : / + = , -   (no "~": after a ":" in an assignment, bash
+#     expands ~ and ~user, so `. ./.env` would read https://x/a:~/b as https://x/a:/root/b)
 # Refused outright: user info (user@host), a query (?) or fragment (#), and "%" (percent-escapes are not accepted; a
 # base URL has no need for them).
 # Not checked: "." and ".." path segments (a /path is used as it is), each host label's own syntax, the IPv6 address
@@ -53,10 +54,10 @@ mdm_check_base_url() {
     *@*)                            why='it contains "@": a base URL takes no user name or password (user@host)' ;;
     *\?*|*#*)                       why='it contains "?" or "#": a base URL takes no query or fragment' ;;
     *%*)                            why='it contains "%": percent-escapes are not accepted in a base URL' ;;
-    *[!A-Za-z0-9._~:/+=,\[\]-]*)
-      bad=${url//[A-Za-z0-9._~:\/+=,\[\]-]/}; bad=${bad:0:1}
+    *[!A-Za-z0-9._:/+=,\[\]-]*)
+      bad=${url//[A-Za-z0-9._:\/+=,\[\]-]/}; bad=${bad:0:1}
       case "$bad" in \') bad="\"'\"" ;; [[:print:]]) bad="'$bad'" ;; *) bad=$(printf '%q' "$bad") ;; esac
-      why="it contains $bad, which is not allowed (only letters, digits and . _ ~ : / + = , [ ] -)" ;;
+      why="it contains $bad, which is not allowed (only letters, digits and . _ : / + = , [ ] -)" ;;
     [Hh][Tt][Tt][Pp]://*)           rest=${url#*://}; url="http://$rest" ;;
     [Hh][Tt][Tt][Pp][Ss]://*)       rest=${url#*://}; url="https://$rest" ;;
     *)                              why='it must start with http:// or https:// (e.g. https://mdm.example.com)' ;;
