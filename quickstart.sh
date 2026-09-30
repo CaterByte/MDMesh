@@ -112,7 +112,7 @@ command -v curl    >/dev/null || { err "curl is required."; exit 1; }
 command -v openssl >/dev/null || { err "openssl is required."; exit 1; }
 
 DIR="${MDMESH_DIR:-mdmesh}"
-mkdir -p "$DIR" && cd "$DIR"
+mkdir -p -- "$DIR" && CDPATH='' cd -P -- "$DIR"   # CDPATH='': ./mdmesh, never a same-named directory CDPATH points at
 [ -f .env ] && { err "An .env already exists in $(pwd) — refusing to overwrite. Remove it to re-run."; exit 1; }
 
 say "== MDMesh quick start (published images) =="

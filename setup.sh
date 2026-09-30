@@ -13,7 +13,8 @@
 #        ./setup.sh --allow-downgrade  # registry IMAGE_OWNER only: build and run a checkout older than the running
 #                              # release, or one with no readable release tag (both refused by default)
 set -euo pipefail
-cd "$(dirname "$0")"
+# CDPATH='': an exported CDPATH would otherwise turn this relative cd (and the .env and libs below) into another directory.
+CDPATH='' cd -P -- "$(dirname -- "$0")"
 
 say()  { printf '\033[1;36m%s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m%s\033[0m\n' "$*"; }

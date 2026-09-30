@@ -18,7 +18,7 @@ export PATH="/usr/sbin:/sbin:$PATH"   # useradd/userdel/pg tools live here; not 
 # statements, in the postgres database), or the mdmesh role (anything reading the mdmesh database), isolated from
 # root's environment and terminal.
 # shellcheck source=lib/runas.sh
-. "$(cd "$(dirname "$0")" && pwd)/lib/runas.sh"
+. "$(CDPATH='' cd -P -- "$(dirname -- "$0")" && pwd -P)/lib/runas.sh"   # CDPATH='': see install-native.sh
 
 BASE_DIR=/opt/mdmesh
 CATALINA=/opt/mdmesh-tc

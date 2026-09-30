@@ -10,7 +10,9 @@ set -euo pipefail
 # run as root here, so 0600/0700 artifacts stay readable by the things that need them.
 umask 077
 export PATH="/usr/sbin:/sbin:$PATH"   # useradd/userdel/pg tools live here; not every root shell has it
-cd "$(dirname "$0")/.."
+# CDPATH='' and -P: an exported CDPATH would otherwise turn this relative cd into a different directory (and REPO, whose
+# libs are sourced below, with it); -P resolves symbolic links so REPO is the real checkout.
+CDPATH='' cd -P -- "$(dirname -- "$0")/.."
 REPO="$PWD"   # repo root — used for absolute paths inside subshells (e.g. exploding the WAR)
 # Shared DB provisioning rules (seed gate, verified seed, post-seed repairs) — same file setup.sh uses.
 # shellcheck source=lib/db.sh
