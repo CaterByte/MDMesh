@@ -113,9 +113,12 @@ sudo ./setup.sh --native      # → install/install-native.sh
 ```
 
 `sudo` is only how you become root. The installer itself never calls it, so on a root-only host without sudo (a
-Proxmox LXC container, a minimal Debian image) run `./setup.sh --native` as root. It and the uninstaller talk to
-Postgres as the `postgres` account directly, with none of root's environment (`PGHOST` and the like in your shell have
-no effect).
+Proxmox LXC container, a minimal Debian image) run `./setup.sh --native` as root. It and the uninstaller reach Postgres
+without sudo, isolated from root's environment (a `PGHOST` and the like in your shell have no effect). Superuser access
+(the `postgres` account) is used only in the `postgres` database, and only for what needs it: creating, altering or
+dropping the role and database. Everything that touches the `mdmesh` database — the pre-upgrade and final `pg_dump`, the
+device/user counts — connects **as the `mdmesh` role** over `127.0.0.1`, with the role password read from `ROOT.xml`, so
+objects owned by that role never run with superuser rights.
 
 It asks for the public base URL, or takes it from `BASE_URL=https://mdm.example.com` (required with `-y`). The value
 must follow the same rule as in Option B.
@@ -170,6 +173,10 @@ the app dir `/opt/mdmesh`, the `mdmesh-server` and `mdmesh-supervisor` units and
 writes a final `pg_dump` to `/root`, and only proceeds when you type `UNINSTALL`. `--keep-data` removes the code
 and services but leaves the database, `/opt/mdmesh/files` and `/opt/mdmesh/backups` in place; `-y` skips the
 prompt for scripted use. Packages installed by apt, your reverse proxy and the git checkout are never touched.
+
+The final dump is taken as the `mdmesh` role, so it needs the role password from `ROOT.xml`. If `ROOT.xml` is gone or
+unreadable — including a pre-0.2.9 install whose Tomcat ran as root, which has no `mdmesh` service user — pass
+`--no-backup` to uninstall without a dump (take one yourself first if you want one).
 
 Restore that dump (or a pre-upgrade one from `/opt/mdmesh/backups/`) **as the `mdmesh` role, never as `postgres`**: a
 restore run by a superuser executes any function the dump's own objects define, so a tampered database could escalate
