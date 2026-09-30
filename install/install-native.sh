@@ -524,13 +524,15 @@ if [ -n "$GITHUB_REPO" ]; then
 d=json.load(sys.stdin)
 def asset(n): return next((a["browser_download_url"] for a in d.get("assets",[]) if a["name"]==n),"")
 print({"apk":asset("mdmesh-agent.apk"),"manifest":asset("manifest.json"),
-       "signature":asset("manifest.json.minisig")}.get(sys.argv[1],""))' "$1" 2>/dev/null || true; }
+       "signature":asset("manifest.json.minisig"),"tag":str(d.get("tag_name") or "")}.get(sys.argv[1],""))' "$1" 2>/dev/null || true; }
   # manifest_apk FIELD FILE: components.apk.FIELD of the manifest FILE; empty when it has none.
   manifest_apk() { python3 -c 'import sys,json;print(json.load(open(sys.argv[2]))["components"]["apk"][sys.argv[1]])' "$1" "$2" 2>/dev/null || true; }
+  # manifest_version FILE: the manifest's top-level "version" (release/build-manifest.sh: the tag without its "v").
+  manifest_version() { python3 -c 'import sys,json;v=json.load(open(sys.argv[1])).get("version");print(v if isinstance(v,str) else "")' "$1" 2>/dev/null || true; }
   # fetch_agent_apk: sets AGENT_APK (and AGENT_CK) when the latest release's APK verifies as described above; otherwise
   # says why in one line and leaves AGENT_APK empty. Always returns 0, so set -e still stops the run on anything else.
   fetch_agent_apk() {
-    local rel apk_url man_url sig_url d want_sha soft=" — console uses debug defaults; host /files/agent.apk manually"
+    local rel apk_url man_url sig_url tag mver d want_sha soft=" — console uses debug defaults; host /files/agent.apk manually"
     AGENT_CK=""
     rel=$(gh_curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>>"$LOGFILE" || true)
     apk_url=$(printf '%s' "$rel" | jget apk); man_url=$(printf '%s' "$rel" | jget manifest)
@@ -555,6 +557,12 @@ print({"apk":asset("mdmesh-agent.apk"),"manifest":asset("manifest.json"),
     fi
     if ! minisign -V -p "$REPO/release/minisign.pub" -m "$d/manifest.json" >> "$LOGFILE" 2>&1; then
       info "The release manifest's signature is invalid (it does not verify with release/minisign.pub), so its APK is not trusted${soft}"; return
+    fi
+    # Bind the signed manifest to this release: an older release's manifest is signed too, and served in its place (a
+    # replay) it would verify. Its version must be the release tag without the "v".
+    tag=$(printf '%s' "$rel" | jget tag); mver=$(manifest_version "$d/manifest.json")
+    if [ -z "$mver" ] || [ "$mver" != "${tag#v}" ]; then
+      info "The signed manifest is for version ${mver:-(none)}, not for the latest release ${tag:-(untagged)}, so its APK is not trusted${soft}"; return
     fi
     AGENT_CK=$(manifest_apk signatureChecksum "$d/manifest.json"); want_sha=$(manifest_apk sha256 "$d/manifest.json")
     if [ -z "$AGENT_CK" ] || [ -z "$want_sha" ]; then
