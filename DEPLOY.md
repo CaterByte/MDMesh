@@ -92,6 +92,10 @@ Debian/Ubuntu, as root. The leaner path: Postgres + Tomcat on the host; you term
 sudo ./setup.sh --native      # → install/install-native.sh
 ```
 
+`sudo` is only how you become root. The installer itself never calls it, so on a root-only host without sudo (a
+Proxmox LXC container, a minimal Debian image) run `./setup.sh --native` as root. It talks to Postgres as the
+`postgres` account directly, with none of root's environment (`PGHOST` and the like in your shell have no effect).
+
 **Upgrading a native install** is the same command after `git pull`. The installer detects existing data and
 asks **Keep** (default, just press Enter) or **Erase** (requires typing `ERASE`). Keep redeploys the code, runs
 migrations, and leaves configurations, devices, users and the enrollment secret untouched; a `pg_dump` is written

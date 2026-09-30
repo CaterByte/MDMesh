@@ -284,6 +284,15 @@ as_svc_user() {
       CATALINA_HOME="$CATALINA" CATALINA_BASE="$CATALINA" CATALINA_PID="$CATALINA_PID" CATALINA_OPTS="${CATALINA_OPTS:-}" \
       "$@" < /dev/null )
 }
+# as_postgres CMD...: runs CMD as the postgres account (psql/pg_dump over peer authentication), without sudo, which
+# root-only hosts such as a Proxmox LXC container do not have. The same isolation as as_svc_user: setsid (no controlling
+# terminal to push keystrokes into), --no-new-privs, and env -i, so root's PGHOST/PGPORT/PGDATABASE/PGOPTIONS/PSQLRC
+# never redirect or alter provisioning. Unlike as_svc_user, stdin is passed through: the role password reaches psql
+# there (role_password_sql below), never on a command line. Call psql with -X so the account's ~/.psqlrc is not run.
+as_postgres() {
+  ( cd / && exec setsid -w setpriv --reuid=postgres --regid=postgres --init-groups --no-new-privs \
+      env -i PATH=/usr/local/bin:/usr/bin:/bin LANG="${LANG:-C.UTF-8}" "$@" )
+}
 port_holder() {
   if command -v ss >/dev/null 2>&1; then ss -ltnp 2>/dev/null | awk -v p=":$HTTP_PORT$" '$4 ~ p {print; exit}'
   elif command -v lsof >/dev/null 2>&1; then lsof -iTCP:"$HTTP_PORT" -sTCP:LISTEN -nP 2>/dev/null | awk 'NR==2{print; exit}'; fi
@@ -307,7 +316,7 @@ refuse_foreign_port() {
   printf '  %s✗ port %s is already in use%s by another server:\n' "$c_red" "$HTTP_PORT" "$c_reset"
   printf '    %s%s%s\n' "$c_dim" "$(port_holder)" "$c_reset"
   printf '  Not an MDMesh Tomcat, so this installer will not stop it. Stop it yourself, or pick another port\n'
-  printf '  (HTTP_PORT=9090), then re-run.  %s(sudo fuser -k %s/tcp kills whatever holds the port)%s\n' "$c_dim" "$HTTP_PORT" "$c_reset"
+  printf '  (HTTP_PORT=9090), then re-run.  %s(fuser -k %s/tcp kills whatever holds the port)%s\n' "$c_dim" "$HTTP_PORT" "$c_reset"
   exit 1
 }
 stop_tomcat() {
@@ -416,17 +425,17 @@ step "Database"
 # Idempotent: every run generates a fresh DB_PASSWORD, so ALWAYS set the role's password to match — ALTER
 # if the role already exists from a previous run, else CREATE — so ROOT.xml + seeding always authenticate.
 # The password reaches psql on stdin as a psql variable (:'pw' quotes it as an SQL literal), never on its command line,
-# which every local user can read (ps, /proc/<pid>/cmdline) and sudo logs. A psql error here can still echo the
+# which every local user can read (ps, /proc/<pid>/cmdline). A psql error here can still echo the
 # statement (password included) into $LOGFILE, which is owner-only (above).
 role_password_sql() { printf '%s\n' "\\set pw $(_mdm_psql_arg "$DB_PASSWORD")" "$1 USER mdmesh WITH PASSWORD :'pw';"; }
 {
-  if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='mdmesh'" | grep -q 1; then
-    role_password_sql ALTER | sudo -u postgres psql -v ON_ERROR_STOP=1
+  if as_postgres psql -X -tAc "SELECT 1 FROM pg_roles WHERE rolname='mdmesh'" | grep -q 1; then
+    role_password_sql ALTER | as_postgres psql -X -v ON_ERROR_STOP=1
   else
-    role_password_sql CREATE | sudo -u postgres psql -v ON_ERROR_STOP=1
+    role_password_sql CREATE | as_postgres psql -X -v ON_ERROR_STOP=1
   fi
-  sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='mdmesh'" | grep -q 1 || \
-    sudo -u postgres psql -c "CREATE DATABASE mdmesh OWNER mdmesh;"
+  as_postgres psql -X -tAc "SELECT 1 FROM pg_database WHERE datname='mdmesh'" | grep -q 1 || \
+    as_postgres psql -X -c "CREATE DATABASE mdmesh OWNER mdmesh;"
 } >> "$LOGFILE" 2>&1
 ok "PostgreSQL role + database 'mdmesh' ready"
 
@@ -479,9 +488,9 @@ if [ "$DB_STATE" = seeded ]; then
     info "Replacing the database — dropping $dc device(s), $uc user(s)"
     stop_tomcat   # release DB connections first
     {
-      sudo -u postgres psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='mdmesh' AND pid<>pg_backend_pid();"
-      sudo -u postgres psql -c "DROP DATABASE mdmesh;"
-      sudo -u postgres psql -c "CREATE DATABASE mdmesh OWNER mdmesh;"
+      as_postgres psql -X -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='mdmesh' AND pid<>pg_backend_pid();"
+      as_postgres psql -X -c "DROP DATABASE mdmesh;"
+      as_postgres psql -X -c "CREATE DATABASE mdmesh OWNER mdmesh;"
     } >> "$LOGFILE" 2>&1
     SEED=yes
   else
@@ -662,8 +671,8 @@ if [ "$SEED" = no ]; then
   # their own .mdmesh-tmp. names only (as in write_under).
   rm -f "$BK_DIR"/.mdmesh-pre-upgrade-*.dump.mdmesh-tmp.??????
   _bk_tmp=$(mktemp "$BK_DIR/.${BK##*/}.mdmesh-tmp.XXXXXX")
-  # shellcheck disable=SC2024  # we ARE root here (checked at the top); sudo only switches to the postgres role
-  if sudo -u postgres pg_dump -Fc mdmesh > "$_bk_tmp" 2>>"$LOGFILE" && mv -fT "$_bk_tmp" "$BK"; then
+  # Root opens the output file (a root-owned mktemp file); the postgres account only writes the dump stream to it.
+  if as_postgres pg_dump -Fc mdmesh > "$_bk_tmp" 2>>"$LOGFILE" && mv -fT "$_bk_tmp" "$BK"; then
     ok "pg_dump written: $BK  (restore: pg_restore -c -d mdmesh $BK)"
   else
     rm -f "$_bk_tmp"
