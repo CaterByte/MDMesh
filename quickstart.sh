@@ -128,7 +128,10 @@ command -v curl    >/dev/null || { err "curl is required."; exit 1; }
 command -v openssl >/dev/null || { err "openssl is required."; exit 1; }
 
 DIR="${MDMESH_DIR:-mdmesh}"
-mkdir -p -- "$DIR" && cd -P -- "$DIR"
+# Two statements, not `mkdir && cd`: under set -e a failure before an && is not fatal, so a failed mkdir would fall
+# through and the rest would run in the wrong directory.
+mkdir -p -- "$DIR"
+cd -P -- "$DIR"
 [ -f .env ] && { err "An .env already exists in $(pwd) — refusing to overwrite. Remove it to re-run."; exit 1; }
 
 say "== MDMesh quick start (published images) =="
