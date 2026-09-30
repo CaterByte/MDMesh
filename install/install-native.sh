@@ -3,6 +3,7 @@
 # server on the host and assumes you terminate TLS yourself (your own reverse proxy / cert, or Caddy in
 # front). For the turnkey experience use ./setup.sh (Docker). Flags: -y/--yes (skip confirm), -v/--verbose
 # (stream all output instead of hiding it in the log). Best-effort + idempotent; review before prod use.
+# shellcheck source-path=SCRIPTDIR  # lets shellcheck -x follow lib/*.sh from any working directory
 set -euo pipefail
 # Secrets hygiene: files this script writes (the install log, ROOT.xml, temp downloads) can carry
 # the DB password / hash secret, so create everything owner-only by default. Tomcat and the server
@@ -18,6 +19,9 @@ REPO="$PWD"   # repo root — used for absolute paths inside subshells (e.g. exp
 . "$REPO/install/lib/version.sh"
 # shellcheck source=lib/url.sh
 . "$REPO/install/lib/url.sh"
+# as_svc_user / as_postgres: commands as the service account or postgres, isolated from root's environment and terminal.
+# shellcheck source=lib/runas.sh
+. "$REPO/install/lib/runas.sh"
 
 [ "$(id -u)" = "0" ] || { echo "Run as root (sudo)."; exit 1; }
 command -v apt-get >/dev/null || { echo "This script targets Debian/Ubuntu."; exit 1; }
@@ -277,25 +281,7 @@ svc_cat() {
     cat -- "$1"
   fi
 }
-# as_svc_user CMD...: runs CMD as $SVC_USER. For Tomcat's own scripts: $CATALINA is that account's tree, so bin/catalina.sh
-# and the bin/setenv.sh it sources are code the account can rewrite, and root must never run them. setsid leaves CMD
-# without a controlling terminal (it could otherwise push keystrokes into root's shell with TIOCSTI), and env -i gives it
-# only Tomcat's settings (those the unit sets), not root's environment.
-as_svc_user() {
-  ( cd / && exec setsid -w setpriv --reuid="$SVC_USER" --regid="$SVC_USER" --init-groups --no-new-privs \
-      env -i PATH=/usr/local/bin:/usr/bin:/bin LANG="${LANG:-C.UTF-8}" JAVA_HOME="${JAVA_HOME:-}" \
-      CATALINA_HOME="$CATALINA" CATALINA_BASE="$CATALINA" CATALINA_PID="$CATALINA_PID" CATALINA_OPTS="${CATALINA_OPTS:-}" \
-      "$@" < /dev/null )
-}
-# as_postgres CMD...: runs CMD as the postgres account (psql/pg_dump over peer authentication), without sudo, which
-# root-only hosts such as a Proxmox LXC container do not have. The same isolation as as_svc_user: setsid (no controlling
-# terminal to push keystrokes into), --no-new-privs, and env -i, so root's PGHOST/PGPORT/PGDATABASE/PGOPTIONS/PSQLRC
-# never redirect or alter provisioning. Unlike as_svc_user, stdin is passed through: the role password reaches psql
-# there (role_password_sql below), never on a command line. Call psql with -X so the account's ~/.psqlrc is not run.
-as_postgres() {
-  ( cd / && exec setsid -w setpriv --reuid=postgres --regid=postgres --init-groups --no-new-privs \
-      env -i PATH=/usr/local/bin:/usr/bin:/bin LANG="${LANG:-C.UTF-8}" "$@" )
-}
+# as_svc_user (run Tomcat's scripts as $SVC_USER) and as_postgres (psql/pg_dump as postgres) are in lib/runas.sh.
 port_holder() {
   if command -v ss >/dev/null 2>&1; then ss -ltnp 2>/dev/null | awk -v p=":$HTTP_PORT$" '$4 ~ p {print; exit}'
   elif command -v lsof >/dev/null 2>&1; then lsof -iTCP:"$HTTP_PORT" -sTCP:LISTEN -nP 2>/dev/null | awk 'NR==2{print; exit}'; fi

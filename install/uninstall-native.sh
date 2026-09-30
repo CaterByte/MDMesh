@@ -9,10 +9,15 @@
 # (/etc/mdmesh), the install log, and — unless --keep-data — the PostgreSQL database + role "mdmesh". A final dump is
 # written first.
 # Leaves alone: apt packages (postgresql, maven, node, …), your reverse proxy/TLS, and the git checkout.
+# shellcheck source-path=SCRIPTDIR  # lets shellcheck -x follow lib/*.sh from any working directory
 set -euo pipefail
 umask 077
 export PATH="/usr/sbin:/sbin:$PATH"   # useradd/userdel/pg tools live here; not every root shell has it
 [ "$(id -u)" = "0" ] || { echo "Run as root (sudo)."; exit 1; }
+# as_svc_user / as_postgres, shared with install-native.sh: commands as the service account or postgres, isolated from
+# root's environment and terminal.
+# shellcheck source=lib/runas.sh
+. "$(cd "$(dirname "$0")" && pwd)/lib/runas.sh"
 
 BASE_DIR=/opt/mdmesh
 CATALINA=/opt/mdmesh-tc
@@ -20,6 +25,7 @@ UNIT=/etc/systemd/system/mdmesh-supervisor.service
 SUP_ENV_DIR=/etc/mdmesh   # the supervisor's settings (install-native.sh)
 SERVER_UNIT=/etc/systemd/system/mdmesh-server.service
 SVC_USER=mdmesh
+CATALINA_PID="$CATALINA/tomcat.pid"   # as_svc_user passes it to catalina.sh (the installer's value)
 INSTALL_LOG=/var/log/mdmesh-install.log
 KEEP_DATA=0; YES=0; BACKUP=1
 for a in "$@"; do
@@ -27,7 +33,7 @@ for a in "$@"; do
     --keep-data) KEEP_DATA=1 ;;
     -y|--yes)    YES=1 ;;
     --no-backup) BACKUP=0 ;;
-    -h|--help)   sed -n '2,12p' "$0"; exit 0 ;;
+    -h|--help)   sed -n '2,11p' "$0"; exit 0 ;;
     *) echo "Unknown flag: $a (see --help)"; exit 1 ;;
   esac
 done
@@ -43,10 +49,10 @@ svc_user_pids() {
     echo "$p"
   done
 }
-db_exists() { su -s /bin/sh postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='mdmesh'\"" 2>/dev/null | grep -q 1; }
+db_exists() { as_postgres psql -X -tAc "SELECT 1 FROM pg_database WHERE datname='mdmesh'" 2>/dev/null | grep -q 1; }
 counts=""
 if db_exists; then
-  counts=$(su -s /bin/sh postgres -c "psql -d mdmesh -tAc \"SELECT (SELECT count(*) FROM devices)||' device(s), '||(SELECT count(*) FROM configurations)||' configuration(s), '||(SELECT count(*) FROM users)||' user(s)'\"" 2>/dev/null || echo "unreadable")
+  counts=$(as_postgres psql -X -d mdmesh -tAc "SELECT (SELECT count(*) FROM devices)||' device(s), '||(SELECT count(*) FROM configurations)||' configuration(s), '||(SELECT count(*) FROM users)||' user(s)'" 2>/dev/null || echo "unreadable")
 fi
 
 echo
@@ -76,23 +82,20 @@ fi
 # 1. Final backup — cheap insurance even when --keep-data (the dump is the portable copy).
 if [ "$BACKUP" = 1 ] && db_exists; then
   DUMP="/root/mdmesh-final-$(date +%Y%m%d-%H%M%S).dump"
-  su -s /bin/sh postgres -c "pg_dump -Fc mdmesh" > "$DUMP" && chmod 600 "$DUMP" && echo "  ✓ final dump: $DUMP  (restore: pg_restore -c -d mdmesh $DUMP)"
+  as_postgres pg_dump -Fc mdmesh > "$DUMP" && chmod 600 "$DUMP" && echo "  ✓ final dump: $DUMP  (restore: pg_restore -c -d mdmesh $DUMP)"
 fi
 
 # 2. Stop Tomcat for good: the systemd unit first (cgroup-tracked), then legacy fallbacks for Tomcats
 #    started by older versions of the installer without a unit. $CATALINA is $SVC_USER's tree, so root never runs its
 #    bin/catalina.sh (nor the bin/setenv.sh it sources): with the unit, systemd stops Tomcat; without one, catalina.sh
-#    runs as $SVC_USER (no controlling terminal, none of root's environment; see as_svc_user in install-native.sh), and
+#    runs as $SVC_USER (no controlling terminal, none of root's environment; see as_svc_user in lib/runas.sh), and
 #    before that account existed (Tomcat ran as root) the signals below stop it.
 if [ -f "$SERVER_UNIT" ] || [ -n "$(systemctl list-unit-files --no-legend mdmesh-server.service 2>/dev/null)" ]; then
   systemctl disable --now mdmesh-server >/dev/null 2>&1 || true
   rm -f "$SERVER_UNIT"; systemctl daemon-reload 2>/dev/null || true
   echo "  ✓ mdmesh-server service removed"
 elif [ -x "$CATALINA/bin/catalina.sh" ] && id -u "$SVC_USER" >/dev/null 2>&1; then
-  ( cd / && exec setsid -w setpriv --reuid="$SVC_USER" --regid="$SVC_USER" --init-groups --no-new-privs \
-      env -i PATH=/usr/local/bin:/usr/bin:/bin JAVA_HOME="${JAVA_HOME:-}" CATALINA_HOME="$CATALINA" \
-      CATALINA_BASE="$CATALINA" CATALINA_PID="$CATALINA/tomcat.pid" "$CATALINA/bin/catalina.sh" stop 20 -force \
-      < /dev/null ) >/dev/null 2>&1 || true
+  as_svc_user "$CATALINA/bin/catalina.sh" stop 20 -force >/dev/null 2>&1 || true
 fi
 for p in $(pgrep -f "^[^ ]*/java .*catalina.base=$CATALINA" || true); do kill "$p" 2>/dev/null || true; done
 for _ in $(seq 1 20); do pgrep -f "^[^ ]*/java .*catalina.base=$CATALINA" >/dev/null || break; sleep 1; done
@@ -114,9 +117,9 @@ fi
 
 # 4. Database.
 if [ "$KEEP_DATA" != 1 ] && db_exists; then
-  su -s /bin/sh postgres -c "psql -qc \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='mdmesh' AND pid<>pg_backend_pid();\"" >/dev/null 2>&1 || true
-  su -s /bin/sh postgres -c "psql -qc 'DROP DATABASE mdmesh;'"
-  su -s /bin/sh postgres -c "psql -qc 'DROP ROLE IF EXISTS mdmesh;'"
+  as_postgres psql -X -qc "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='mdmesh' AND pid<>pg_backend_pid();" >/dev/null 2>&1 || true
+  as_postgres psql -X -qc 'DROP DATABASE mdmesh;'
+  as_postgres psql -X -qc 'DROP ROLE IF EXISTS mdmesh;'
   echo "  ✓ database + role dropped"
 fi
 

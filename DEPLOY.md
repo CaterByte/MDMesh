@@ -98,8 +98,9 @@ sudo ./setup.sh --native      # → install/install-native.sh
 ```
 
 `sudo` is only how you become root. The installer itself never calls it, so on a root-only host without sudo (a
-Proxmox LXC container, a minimal Debian image) run `./setup.sh --native` as root. It talks to Postgres as the
-`postgres` account directly, with none of root's environment (`PGHOST` and the like in your shell have no effect).
+Proxmox LXC container, a minimal Debian image) run `./setup.sh --native` as root. It and the uninstaller talk to
+Postgres as the `postgres` account directly, with none of root's environment (`PGHOST` and the like in your shell have
+no effect).
 
 It asks for the public base URL, or takes it from `BASE_URL=https://mdm.example.com` (required with `-y`). The value
 must follow the same rule as in Option B.
