@@ -60,12 +60,20 @@ db_exists() { as_postgres psql -X -tAc "SELECT 1 FROM pg_database WHERE datname=
 # as that role (as_mdmesh_role), never as the postgres superuser: see lib/runas.sh for why.
 DB_PW=$(as_svc_user cat -- "$CATALINA/conf/Catalina/localhost/ROOT.xml" 2>/dev/null \
         | sed -n 's/.*name="JDBC.password"[[:space:]]*value="\([^"]*\)".*/\1/p' | head -n 1) || DB_PW=""
+# n_or_q RESULT: RESULT when it is a plain non-negative integer, else "?". The counts print to root's terminal, and the
+# mdmesh role owns these relations (and its search_path), so it must not slip control bytes into that summary; count(*)
+# per relation is a bigint, and this rejects anything else. Each count is its own query — no SQL-side "||", whose
+# operator the role could shadow to return arbitrary text.
+n_or_q() { case "$1" in ''|*[!0-9]*) printf '?' ;; *) printf '%s' "$1" ;; esac; }
 counts=""
 if db_exists; then
   if [ -z "$DB_PW" ]; then
     counts="unreadable (no database password in ROOT.xml)"
   else
-    counts=$(as_mdmesh_role "$DB_PW" psql -X -tAc "SELECT (SELECT count(*) FROM devices)||' device(s), '||(SELECT count(*) FROM configurations)||' configuration(s), '||(SELECT count(*) FROM users)||' user(s)'" 2>/dev/null || echo "unreadable")
+    _cd=$(as_mdmesh_role "$DB_PW" psql -X -tAc 'SELECT count(*) FROM devices' 2>/dev/null) || _cd=""
+    _cc=$(as_mdmesh_role "$DB_PW" psql -X -tAc 'SELECT count(*) FROM configurations' 2>/dev/null) || _cc=""
+    _cu=$(as_mdmesh_role "$DB_PW" psql -X -tAc 'SELECT count(*) FROM users' 2>/dev/null) || _cu=""
+    counts="$(n_or_q "$_cd") device(s), $(n_or_q "$_cc") configuration(s), $(n_or_q "$_cu") user(s)"
   fi
 fi
 

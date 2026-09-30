@@ -457,7 +457,10 @@ if [ "$DB_STATE" = inconsistent ]; then
   printf '  %sRestore a backup or repair the settings table by hand, then re-run.%s\n' "$c_yel" "$c_reset"; exit 1
 fi
 if [ "$DB_STATE" = seeded ]; then
-  uc=$(q "SELECT count(*) FROM users"); dc=$(q "SELECT count(*) FROM devices"); dc=${dc:-0}
+  # count(*) is a bigint; keep only a plain integer (else "?") so nothing the mdmesh role owns can put control bytes
+  # into the prompt printed to the terminal.
+  n_or_q() { case "$1" in ''|*[!0-9]*) printf '?' ;; *) printf '%s' "$1" ;; esac; }
+  uc=$(n_or_q "$(q "SELECT count(*) FROM users")"); dc=$(n_or_q "$(q "SELECT count(*) FROM devices")")
   REPLACE_DATA="${REPLACE_DATA:-}"
   if [ -z "$REPLACE_DATA" ]; then
     if [ "$ASSUME_YES" = 1 ]; then
