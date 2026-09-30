@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared BASE_URL rule for the installers (setup.sh, install/install-native.sh; quickstart.sh keeps a verbatim copy of
+# Shared BASE_URL and hostname rules for the installers (setup.sh, install/install-native.sh; quickstart.sh keeps a verbatim copy of
 # the functions between the markers below, which CI checks). Source this file; do not execute it. bash 3.2 compatible
 # (quickstart may run under macOS's bash).
 #
@@ -69,6 +69,26 @@ mdm_check_base_url() {
   url=${!1-}
   case "$url" in *[![:print:]]*) url=$(printf '%q' "$url") ;; esac   # shown as typed, unless that would garble the terminal
   printf 'Invalid public base URL %s: %s.\n' "${url:-(empty)}" "$why" >&2
+  return 1
+}
+# mdm_check_host VAR: checks that the variable named VAR holds a bare host[:port] as described above, with no scheme,
+# path, user@, query or fragment: what the hostname prompts ask for (it becomes BASE_URL and Caddy's site address).
+# Otherwise it prints why to stderr and fails. The value is never changed.
+mdm_check_host() {
+  local h=${!1-} bad='' why=''
+  case "$h" in
+    '')                 why='it is empty' ;;
+    *://*)              why='enter the name only, without http:// or https://' ;;
+    */*|*\?*|*#*|*@*)   why='enter the name only: no /path, ?query, #fragment or user@' ;;
+    *[!A-Za-z0-9.:\[\]-]*)
+      bad=${h//[A-Za-z0-9.:\[\]-]/}; bad=${bad:0:1}
+      case "$bad" in \') bad="\"'\"" ;; [[:print:]]) bad="'$bad'" ;; *) bad=$(printf '%q' "$bad") ;; esac
+      why="it contains $bad, which is not allowed (only letters, digits, . and -, or an [IPv6] address, then an optional :port)" ;;
+  esac
+  [ -n "$why" ] || why=$(_mdm_hostport_problem "$h")
+  [ -z "$why" ] && return 0
+  case "$h" in *[![:print:]]*) h=$(printf '%q' "$h") ;; esac
+  printf 'Invalid hostname %s: %s.\n' "${h:-(empty)}" "$why" >&2
   return 1
 }
 # <<< url.sh functions <<<

@@ -142,6 +142,7 @@ else
 
   if [ "$MODE" = "1" ]; then
     read -rp "Public hostname devices will use (e.g. mdm.example.com): " HOST
+    mdm_check_host HOST || { err "Enter the hostname only, e.g. mdm.example.com, then re-run."; exit 1; }
     read -rp "Cloudflare Tunnel token (Zero Trust → Tunnels → your tunnel): " TUNNEL_TOKEN
     BASE_URL="https://${HOST}"
     SITE_ADDRESS=":80"
@@ -152,6 +153,7 @@ else
     EXTRA_NOTE="In Cloudflare, route the tunnel's public hostname ($HOST) to http://caddy:80."
   else
     read -rp "Your domain (DNS already pointing here, e.g. mdm.example.com): " HOST
+    mdm_check_host HOST || { err "Enter the hostname only, e.g. mdm.example.com, then re-run."; exit 1; }
     read -rp "Email for Let's Encrypt: " ACME_EMAIL
     BASE_URL="https://${HOST}"
     SITE_ADDRESS="${HOST}"

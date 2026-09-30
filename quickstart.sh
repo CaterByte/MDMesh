@@ -84,6 +84,26 @@ mdm_check_base_url() {
   printf 'Invalid public base URL %s: %s.\n' "${url:-(empty)}" "$why" >&2
   return 1
 }
+# mdm_check_host VAR: checks that the variable named VAR holds a bare host[:port] as described above, with no scheme,
+# path, user@, query or fragment: what the hostname prompts ask for (it becomes BASE_URL and Caddy's site address).
+# Otherwise it prints why to stderr and fails. The value is never changed.
+mdm_check_host() {
+  local h=${!1-} bad='' why=''
+  case "$h" in
+    '')                 why='it is empty' ;;
+    *://*)              why='enter the name only, without http:// or https://' ;;
+    */*|*\?*|*#*|*@*)   why='enter the name only: no /path, ?query, #fragment or user@' ;;
+    *[!A-Za-z0-9.:\[\]-]*)
+      bad=${h//[A-Za-z0-9.:\[\]-]/}; bad=${bad:0:1}
+      case "$bad" in \') bad="\"'\"" ;; [[:print:]]) bad="'$bad'" ;; *) bad=$(printf '%q' "$bad") ;; esac
+      why="it contains $bad, which is not allowed (only letters, digits, . and -, or an [IPv6] address, then an optional :port)" ;;
+  esac
+  [ -n "$why" ] || why=$(_mdm_hostport_problem "$h")
+  [ -z "$why" ] && return 0
+  case "$h" in *[![:print:]]*) h=$(printf '%q' "$h") ;; esac
+  printf 'Invalid hostname %s: %s.\n' "${h:-(empty)}" "$why" >&2
+  return 1
+}
 # <<< url.sh functions <<<
 
 command -v docker >/dev/null || { err "Docker is required."; exit 1; }
@@ -134,12 +154,14 @@ DB_PASSWORD=$(rand); HASH_SECRET=$(rand); ADMIN_PASSWORD=$(rand); RESET_TOKEN=$(
 
 if [ "$MODE" = "1" ]; then
   read -rp "Public hostname devices will use (e.g. mdm.example.com): " HOST
+  mdm_check_host HOST || { err "Enter the hostname only, e.g. mdm.example.com, then re-run."; exit 1; }
   read -rp "Cloudflare Tunnel token (Zero Trust → Tunnels → your tunnel): " TUNNEL_TOKEN
   BASE_URL="https://${HOST}"; SITE_ADDRESS=":80"; ACME_EMAIL=""
   COMPOSE_FILE="docker-compose.yml"; COMPOSE_PROFILES="cloudflare"
   EXTRA_NOTE="In Cloudflare, route the tunnel's public hostname ($HOST) to http://caddy:80."
 else
   read -rp "Your domain (DNS already pointing here, e.g. mdm.example.com): " HOST
+  mdm_check_host HOST || { err "Enter the hostname only, e.g. mdm.example.com, then re-run."; exit 1; }
   read -rp "Email for Let's Encrypt: " ACME_EMAIL
   BASE_URL="https://${HOST}"; SITE_ADDRESS="${HOST}"; TUNNEL_TOKEN=""
   COMPOSE_FILE="docker-compose.yml:docker-compose.domain.yml"; COMPOSE_PROFILES=""
