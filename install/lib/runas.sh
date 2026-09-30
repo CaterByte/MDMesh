@@ -39,7 +39,7 @@ as_postgres() {
 as_mdmesh_role() {
   ( cd / || exit 1
     unset PSQLRC "${!PG@}"
-    PGPASSWORD=$1; export PGPASSWORD; export PATH=/usr/local/bin:/usr/bin:/bin
+    PGPASSWORD=$1; export PGPASSWORD
     shift
-    exec "$1" -h 127.0.0.1 -p 5432 -U mdmesh -d mdmesh "${@:2}" )
+    exec env PATH=/usr/local/bin:/usr/bin:/bin "$1" -h 127.0.0.1 -p 5432 -U mdmesh -d mdmesh "${@:2}" )
 }
