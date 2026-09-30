@@ -7,6 +7,10 @@
 # It creates ./mdmesh, downloads the pull-only compose + seed, generates secrets, brings the stack
 # up, and prints the console URL + a temporary admin password (you set your own on first login).
 set -euo pipefail
+# An exported CDPATH makes cd (here and in every child, e.g. `bash -c 'cd web && …'`) resolve a relative path against
+# CDPATH's directories, not the current one — silently building or reading from a same-named directory elsewhere. Unset
+# it for this script and its children.
+unset CDPATH
 
 REPO="MDMesh-app/MDMesh"
 BRANCH="main"   # where the compose + seed come from only when the release can't be resolved (see below)
@@ -117,7 +121,7 @@ command -v curl    >/dev/null || { err "curl is required."; exit 1; }
 command -v openssl >/dev/null || { err "openssl is required."; exit 1; }
 
 DIR="${MDMESH_DIR:-mdmesh}"
-mkdir -p -- "$DIR" && CDPATH='' cd -P -- "$DIR"   # CDPATH='': ./mdmesh, never a same-named directory CDPATH points at
+mkdir -p -- "$DIR" && cd -P -- "$DIR"
 [ -f .env ] && { err "An .env already exists in $(pwd) — refusing to overwrite. Remove it to re-run."; exit 1; }
 
 say "== MDMesh quick start (published images) =="

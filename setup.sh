@@ -13,8 +13,11 @@
 #        ./setup.sh --allow-downgrade  # registry IMAGE_OWNER only: build and run a checkout older than the running
 #                              # release, or one with no readable release tag (both refused by default)
 set -euo pipefail
-# CDPATH='': an exported CDPATH would otherwise turn this relative cd (and the .env and libs below) into another directory.
-CDPATH='' cd -P -- "$(dirname -- "$0")"
+# An exported CDPATH makes cd (here and in every child, e.g. `bash -c 'cd web && …'`) resolve a relative path against
+# CDPATH's directories, not the current one — silently building or reading from a same-named directory elsewhere. Unset
+# it for this script and its children.
+unset CDPATH
+cd -P -- "$(dirname -- "$0")"
 
 say()  { printf '\033[1;36m%s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m%s\033[0m\n' "$*"; }

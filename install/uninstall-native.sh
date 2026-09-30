@@ -11,6 +11,10 @@
 # Leaves alone: apt packages (postgresql, maven, node, …), your reverse proxy/TLS, and the git checkout.
 # shellcheck source-path=SCRIPTDIR  # lets shellcheck -x follow lib/*.sh from any working directory
 set -euo pipefail
+# An exported CDPATH makes cd (here and in every child, e.g. `bash -c 'cd web && …'`) resolve a relative path against
+# CDPATH's directories, not the current one — silently building or reading from a same-named directory elsewhere. Unset
+# it for this script and its children.
+unset CDPATH
 umask 077
 export PATH="/usr/sbin:/sbin:$PATH"   # useradd/userdel/pg tools live here; not every root shell has it
 [ "$(id -u)" = "0" ] || { echo "Run as root (sudo)."; exit 1; }
@@ -18,7 +22,7 @@ export PATH="/usr/sbin:/sbin:$PATH"   # useradd/userdel/pg tools live here; not 
 # statements, in the postgres database), or the mdmesh role (anything reading the mdmesh database), isolated from
 # root's environment and terminal.
 # shellcheck source=lib/runas.sh
-. "$(CDPATH='' cd -P -- "$(dirname -- "$0")" && pwd -P)/lib/runas.sh"   # CDPATH='': see install-native.sh
+. "$(cd -P -- "$(dirname -- "$0")" && pwd -P)/lib/runas.sh"
 
 BASE_DIR=/opt/mdmesh
 CATALINA=/opt/mdmesh-tc

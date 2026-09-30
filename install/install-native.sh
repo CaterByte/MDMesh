@@ -5,14 +5,17 @@
 # (stream all output instead of hiding it in the log). Best-effort + idempotent; review before prod use.
 # shellcheck source-path=SCRIPTDIR  # lets shellcheck -x follow lib/*.sh from any working directory
 set -euo pipefail
+# An exported CDPATH makes cd (here and in every child, e.g. `bash -c 'cd web && …'`) resolve a relative path against
+# CDPATH's directories, not the current one — silently building or reading from a same-named directory elsewhere. Unset
+# it for this script and its children.
+unset CDPATH
 # Secrets hygiene: files this script writes (the install log, ROOT.xml, temp downloads) can carry
 # the DB password / hash secret, so create everything owner-only by default. Tomcat and the server
 # run as root here, so 0600/0700 artifacts stay readable by the things that need them.
 umask 077
 export PATH="/usr/sbin:/sbin:$PATH"   # useradd/userdel/pg tools live here; not every root shell has it
-# CDPATH='' and -P: an exported CDPATH would otherwise turn this relative cd into a different directory (and REPO, whose
-# libs are sourced below, with it); -P resolves symbolic links so REPO is the real checkout.
-CDPATH='' cd -P -- "$(dirname -- "$0")/.."
+# -P resolves symbolic links so REPO is the real checkout.
+cd -P -- "$(dirname -- "$0")/.."
 REPO="$PWD"   # repo root — used for absolute paths inside subshells (e.g. exploding the WAR)
 # Shared DB provisioning rules (seed gate, verified seed, post-seed repairs) — same file setup.sh uses.
 # shellcheck source=lib/db.sh
