@@ -3,33 +3,33 @@ package com.mdmesh.agent
 import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Intent
-import android.graphics.Color
-import android.graphics.Typeface
 import android.os.Bundle
-import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.EditText
-import android.widget.GridLayout
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
+import com.mdmesh.agent.brand.BrandAssets
+import com.mdmesh.agent.brand.KioskScreens
+import com.mdmesh.agent.brand.LauncherApp
+import com.mdmesh.agent.brand.RemoteImages
 import com.mdmesh.agent.service.CheckInService
 import com.mdmesh.core.store.KioskStateStore
 import com.mdmesh.core.telemetry.EventSink
 import com.mdmesh.kiosk.CrashLoopGuard
 import com.mdmesh.kiosk.KioskController
+import com.mdmesh.kiosk.brand.KioskBrand
+import com.mdmesh.kiosk.brand.KioskBrandTheme
 import com.mdmesh.proto.KioskApplyPayload
+import com.mdmesh.proto.KioskThemeDto
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -41,6 +41,10 @@ import javax.inject.Inject
  *
  *  - `mode == "single"` → launch + pin the single allowed app ([KioskApplyPayload.pinPackage]).
  *  - `mode == "launcher"` → a themed grid of [KioskApplyPayload.allowedPackages].
+ *
+ * MeinConnect fork: all surfaces are drawn by [KioskScreens] in the MeinConnect CI and re-skinned by
+ * the optional theme fields (title, logo, accent, background image, brand bar). Remote images load
+ * asynchronously; the screen is drawn immediately and redrawn once they arrive.
  *  - no payload → an idle "managed device" screen (the agent is not in kiosk).
  *
  * Exit affordance is driven by [KioskApplyPayload.exitMode] (`gesture` 7-tap corner / `visible`
@@ -61,12 +65,20 @@ class KioskLauncherActivity : ComponentActivity() {
     /** Last applied non-null kiosk state, so [onResume] can recover a bounced single-app pin. */
     private var active: KioskApplyPayload? = null
 
+    /** What is currently on screen, so a late-arriving logo/background redraws the same surface. */
+    private enum class Screen { IDLE, SPLASH, LAUNCHER, RECOVERY }
+    private var screen = Screen.IDLE
+
+    private var assets = BrandAssets()
+    private var assetsKey: Pair<String?, String?>? = null
+    private var assetsJob: Job? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // A kiosk device boots straight into HOME (this); keep the command channel alive even if
         // the user never opens the status screen.
         ContextCompat.startForegroundService(this, Intent(this, CheckInService::class.java))
-        setContentView(idleView())
+        show(Screen.IDLE)
         // React to kiosk.enter/kiosk.exit live: those run in the check-in service, not here, so we
         // observe the persisted state and re-render (enter → grid/pin, exit → unpin + idle) without
         // waiting for the user to touch the screen.
@@ -94,7 +106,7 @@ class KioskLauncherActivity : ComponentActivity() {
         active = p
         if (p == null) {
             stopLockTaskSafely()
-            setContentView(idleView())
+            show(Screen.IDLE)
             return
         }
         if (bailOnCrashLoop()) return
@@ -102,7 +114,7 @@ class KioskLauncherActivity : ComponentActivity() {
         if (p.mode == "single" && p.pinPackage != null) {
             launchPinned(p)
         } else {
-            setContentView(launcherGrid(p))
+            show(Screen.LAUNCHER)
         }
     }
 
@@ -110,10 +122,10 @@ class KioskLauncherActivity : ComponentActivity() {
     private fun launchPinned(p: KioskApplyPayload) {
         val intent = p.pinPackage?.let { packageManager.getLaunchIntentForPackage(it) }
         if (intent == null) {
-            setContentView(launcherGrid(p)) // unknown package → fall back to the grid
+            show(Screen.LAUNCHER) // unknown package → fall back to the grid
             return
         }
-        setContentView(splashView(p))
+        show(Screen.SPLASH)
         runCatching { startActivity(intent) }
     }
 
@@ -124,7 +136,7 @@ class KioskLauncherActivity : ComponentActivity() {
         controller.exit()
         active = null
         lifecycleScope.launch { store.save(null) }
-        setContentView(recoveryView())
+        show(Screen.RECOVERY)
         return true
     }
 
@@ -153,15 +165,19 @@ class KioskLauncherActivity : ComponentActivity() {
         val input = EditText(this).apply {
             inputType = android.text.InputType.TYPE_CLASS_TEXT or
                 android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            hint = "Admin password"
+            hint = getString(R.string.kiosk_exit_hint)
         }
         AlertDialog.Builder(this)
-            .setTitle("Exit kiosk")
+            .setTitle(R.string.kiosk_exit)
             .setView(input)
-            .setPositiveButton("Exit") { _, _ ->
-                if (input.text.toString() == pw) doExit()
+            .setPositiveButton(R.string.kiosk_exit_confirm) { _, _ ->
+                if (input.text.toString() == pw) {
+                    doExit()
+                } else {
+                    Toast.makeText(this, R.string.kiosk_exit_wrong, Toast.LENGTH_SHORT).show()
+                }
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(R.string.kiosk_exit_cancel, null)
             .show()
     }
 
@@ -191,137 +207,88 @@ class KioskLauncherActivity : ComponentActivity() {
         }
     }
 
-    // --- Views -------------------------------------------------------------------------------
+    // --- Views (MeinConnect fork: KioskScreens) ----------------------------------------------
 
-    private fun splashView(p: KioskApplyPayload): View {
-        val bg = parseColor(p.theme.backgroundColor, INK)
-        val fg = parseColor(p.theme.textColor, TEXT)
-        return frame(bg).apply {
-            addView(centeredText("Loading…", 18f, fg))
-            addExitAffordance(p, this)
-        }
-    }
-
-    private fun launcherGrid(p: KioskApplyPayload): View {
-        val bg = parseColor(p.theme.backgroundColor, INK)
-        val fg = parseColor(p.theme.textColor, TEXT)
-        val cell = iconCellPx(p.theme.iconSize)
-        val cols = maxOf(2, (resources.displayMetrics.widthPixels - dp(24)) / (cell + dp(24)))
-
-        val grid = GridLayout(this).apply {
-            columnCount = cols
-            setPadding(dp(12), dp(16), dp(12), dp(28))
-        }
-        var rendered = 0
-        for (pkg in p.allowedPackages.distinct()) {
-            val app = runCatching { packageManager.getApplicationInfo(pkg, 0) }.getOrNull() ?: continue
-            val icon = runCatching { packageManager.getApplicationIcon(pkg) }.getOrNull() ?: continue
-            val label = runCatching { packageManager.getApplicationLabel(app).toString() }.getOrDefault(pkg)
-            grid.addView(appCell(pkg, label, icon, cell, fg))
-            rendered++
-        }
-
-        // Always render a header + (when nothing resolved) an empty-state, so kiosk is never a
-        // bare black screen — that previously happened whenever the allowlist was empty or none of
-        // the packages were installed on the device.
-        val column = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(28), dp(24), dp(12))
-            layoutParams = ViewGroup.LayoutParams(MATCH, ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
-        column.addView(text("MDMesh Kiosk", 20f, fg, bold = true))
-        if (rendered == 0) {
-            column.addView(
-                text(
-                    "No available apps. Add installed app packages to this kiosk's allowed list.",
-                    14f,
-                    MUTED,
-                ).apply { setPadding(0, dp(10), 0, 0) },
+    /** Draws [target] for the current payload; safe to call again (e.g. when remote images arrive). */
+    private fun show(target: Screen) {
+        screen = target
+        val p = active
+        val theme = themeOf(p)
+        ensureAssets(theme)
+        val screens = KioskScreens(this, theme, assets)
+        val view = when (target) {
+            Screen.IDLE -> screens.status(
+                getString(R.string.kiosk_idle_title),
+                getString(R.string.kiosk_idle_body),
             )
+            Screen.SPLASH -> screens.status(null, getString(R.string.kiosk_loading), progress = true)
+            Screen.RECOVERY -> screens.status(
+                getString(R.string.kiosk_recovery_title),
+                getString(R.string.kiosk_recovery_body),
+                alert = true,
+            )
+            Screen.LAUNCHER -> screens.launcher(launcherApps(p)) { pkg -> launchApp(pkg) }
         }
-        column.addView(grid)
-
-        val root = frame(bg)
-        root.addView(
-            ScrollView(this).apply {
-                addView(column)
-                layoutParams = ViewGroup.LayoutParams(MATCH, MATCH)
-            },
-        )
-        addExitAffordance(p, root)
-        return root
+        if (p != null && target != Screen.RECOVERY) addExitAffordance(p, view, screens)
+        setContentView(view)
     }
 
-    private fun appCell(
-        pkg: String,
-        label: String,
-        icon: android.graphics.drawable.Drawable,
-        cellPx: Int,
-        fg: Int,
-    ): View = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        gravity = Gravity.CENTER
-        setPadding(dp(12), dp(12), dp(12), dp(12))
-        isClickable = true
-        addView(
-            ImageView(this@KioskLauncherActivity).apply {
-                setImageDrawable(icon)
-                layoutParams = LinearLayout.LayoutParams(cellPx, cellPx)
-            },
+    private fun themeOf(p: KioskApplyPayload?): KioskBrandTheme {
+        val t = p?.theme ?: KioskThemeDto()
+        return KioskBrand.resolve(
+            backgroundColor = t.backgroundColor,
+            textColor = t.textColor,
+            accentColor = t.accentColor,
+            brandBar = t.brandBar,
+            iconSize = t.iconSize,
+            title = t.title,
+            logoUrl = t.logoUrl,
+            backgroundImageUrl = t.backgroundImageUrl,
         )
-        addView(
-            text(label, 12f, fg).apply {
-                gravity = Gravity.CENTER
-                maxLines = 1
-                setPadding(0, dp(6), 0, 0)
-            },
-        )
-        setOnClickListener {
-            runCatching {
-                packageManager.getLaunchIntentForPackage(pkg)?.let { startActivity(it) }
+    }
+
+    /** Starts loading the configured logo/background once per distinct pair of URLs, then redraws. */
+    private fun ensureAssets(theme: KioskBrandTheme) {
+        val key = theme.logoUrl to theme.backgroundImageUrl
+        if (key == assetsKey) return
+        assetsKey = key
+        assets = BrandAssets()
+        assetsJob?.cancel()
+        if (key.first == null && key.second == null) return
+        assetsJob = lifecycleScope.launch {
+            val longSide = maxOf(resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels)
+            val logo = key.first?.let { RemoteImages.load(this@KioskLauncherActivity, it, LOGO_MAX_PX) }
+            val background = key.second?.let { RemoteImages.load(this@KioskLauncherActivity, it, longSide) }
+            if (assetsKey == key && (logo != null || background != null)) {
+                assets = BrandAssets(logo, background)
+                show(screen)
             }
         }
     }
 
-    private fun idleView(): View = frame(INK).apply {
-        val col = LinearLayout(this@KioskLauncherActivity).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            layoutParams = ViewGroup.LayoutParams(MATCH, MATCH)
+    private fun launcherApps(p: KioskApplyPayload?): List<LauncherApp> =
+        p?.allowedPackages.orEmpty().distinct().mapNotNull { pkg ->
+            val app = runCatching { packageManager.getApplicationInfo(pkg, 0) }.getOrNull()
+            val icon = runCatching { packageManager.getApplicationIcon(pkg) }.getOrNull()
+            if (app == null || icon == null) {
+                null
+            } else {
+                val label = runCatching { packageManager.getApplicationLabel(app).toString() }.getOrDefault(pkg)
+                LauncherApp(pkg, label, icon)
+            }
         }
-        col.addView(centeredText("MDMesh", 28f, SIGNAL, bold = true))
-        col.addView(centeredText("Managed device", 14f, MUTED))
-        addView(col)
-    }
 
-    private fun recoveryView(): View = frame(INK).apply {
-        val col = LinearLayout(this@KioskLauncherActivity).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(28), 0, dp(28), 0)
-            layoutParams = ViewGroup.LayoutParams(MATCH, MATCH)
-        }
-        col.addView(centeredText("Kiosk stopped", 22f, ALERT, bold = true))
-        col.addView(
-            centeredText(
-                "A kiosk app crashed repeatedly, so kiosk mode was disabled to keep the device usable.",
-                14f,
-                MUTED,
-            ).apply { setPadding(0, dp(12), 0, 0) },
-        )
-        addView(col)
+    private fun launchApp(pkg: String) {
+        runCatching { packageManager.getLaunchIntentForPackage(pkg)?.let { startActivity(it) } }
     }
 
     /** Add the per-[KioskApplyPayload.exitMode] exit affordance to [parent]. */
-    private fun addExitAffordance(p: KioskApplyPayload, parent: ViewGroup) {
+    private fun addExitAffordance(p: KioskApplyPayload, parent: ViewGroup, screens: KioskScreens) {
         when (p.exitMode) {
             "visible" -> {
-                val btn = Button(this).apply {
-                    text = "Exit kiosk"
-                    setOnClickListener { promptExit(p) }
-                }
+                val btn = screens.pillButton(getString(R.string.kiosk_exit)) { promptExit(p) }
                 parent.addView(
-                    FrameWrap(this, btn, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, dp(24)),
+                    FrameWrap(this, btn, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, dp(EXIT_MARGIN_DP)),
                 )
             }
             "gesture" -> {
@@ -335,54 +302,22 @@ class KioskLauncherActivity : ComponentActivity() {
                         if (++taps >= GESTURE_TAPS) { taps = 0; promptExit(p) }
                     }
                 }
-                parent.addView(
-                    FrameWrap(this, target, Gravity.TOP or Gravity.END, 0, dp(72), dp(72)),
-                )
+                val size = dp(GESTURE_TARGET_DP)
+                parent.addView(FrameWrap(this, target, Gravity.TOP or Gravity.END, 0, size, size))
             }
             else -> Unit // "remote": no on-device exit
         }
     }
 
-    // --- View helpers ------------------------------------------------------------------------
-
-    private fun frame(bg: Int): android.widget.FrameLayout =
-        android.widget.FrameLayout(this).apply {
-            setBackgroundColor(bg)
-            layoutParams = ViewGroup.LayoutParams(MATCH, MATCH)
-        }
-
-    private fun centeredText(s: String, sizeSp: Float, color: Int, bold: Boolean = false): TextView =
-        text(s, sizeSp, color, bold).apply { gravity = Gravity.CENTER }
-
-    private fun text(s: String, sizeSp: Float, color: Int, bold: Boolean = false): TextView =
-        TextView(this).apply {
-            text = s
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
-            setTextColor(color)
-            if (bold) setTypeface(typeface, Typeface.BOLD)
-        }
-
-    private fun iconCellPx(size: String?): Int = when (size?.uppercase()) {
-        "LARGE" -> dp(96)
-        "MEDIUM" -> dp(72)
-        else -> dp(56)
-    }
-
-    private fun parseColor(value: String?, fallback: Int): Int =
-        value?.let { runCatching { Color.parseColor(it) }.getOrNull() } ?: fallback
-
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     private companion object {
-        const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val GESTURE_TAPS = 7
         const val GESTURE_WINDOW_MS = 3_000L
+        const val GESTURE_TARGET_DP = 72
+        const val EXIT_MARGIN_DP = 24
+        const val LOGO_MAX_PX = 1024
         const val HOME_ALIAS = "com.mdmesh.agent.KioskHomeAlias"
-        val INK = Color.parseColor("#0E1117")
-        val TEXT = Color.parseColor("#E8EEF4")
-        val MUTED = Color.parseColor("#8693A4")
-        val SIGNAL = Color.parseColor("#F4B942")
-        val ALERT = Color.parseColor("#F2545B")
     }
 }
 

@@ -24,3 +24,17 @@ This product and its modifications:
   under proto/, the web admin under web/, and the agent v1 server endpoints)
   are original works. Files derived from the upstream retain their original
   Apache-2.0 headers.
+
+-------------------------------------------------------------------------
+MeinConnect fork (CaterByte/MDMesh):
+
+  Modifications for MeinConnect (kiosk/launcher branding, own agent identity
+  de.meinconnect.mdm, release keys) (c) 2026 MeinConnect. See
+  docs/meinconnect/README.md for the list of fork changes.
+
+  "MeinConnect" name and logo are marks of their owner and are not licensed
+  under Apache-2.0.
+
+  Bundled font: Poppins (agent-android/app/src/main/res/font/poppins_*.ttf),
+  Copyright 2020 The Poppins Project Authors, licensed under the SIL Open Font
+  License 1.1 — full text in agent-android/third_party/poppins/OFL.txt.

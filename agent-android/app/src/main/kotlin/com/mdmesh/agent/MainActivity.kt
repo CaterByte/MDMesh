@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -17,10 +18,13 @@ import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.mdmesh.agent.brand.BrandBarView
+import com.mdmesh.agent.brand.BrandFonts
 import com.mdmesh.agent.service.CheckInService
 import com.mdmesh.core.config.ServerConfigStore
 import com.mdmesh.core.store.DeviceIdStore
 import com.mdmesh.core.sync.SyncStatus
+import com.mdmesh.kiosk.brand.KioskBrand
 import com.mdmesh.policy.wifi.DpmHandle
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -115,8 +119,7 @@ class MainActivity : ComponentActivity() {
             setPadding(dp(28), dp(40), dp(28), dp(40))
             layoutParams = ViewGroup.LayoutParams(MATCH, MATCH)
         }
-        root.addView(text("MDMesh", 30f, SIGNAL, bold = true))
-        root.addView(text("Device agent", 14f, MUTED).apply { setPadding(0, dp(2), 0, dp(20)) })
+        addBrandHeader(root)
 
         root.addView(label("MANAGEMENT"))
         root.addView(
@@ -154,7 +157,7 @@ class MainActivity : ComponentActivity() {
         root.addView(spacer())
 
         root.addView(
-            text("Managed by MDMesh", 12f, MUTED).apply {
+            text(getString(R.string.agent_managed_by), 12f, MUTED).apply {
                 gravity = Gravity.CENTER
                 setPadding(0, dp(24), 0, 0)
             },
@@ -165,6 +168,22 @@ class MainActivity : ComponentActivity() {
             addView(root)
             layoutParams = ViewGroup.LayoutParams(MATCH, MATCH)
         }
+    }
+
+    /** MeinConnect fork: brand bar + logo header instead of the MDMesh wordmark. */
+    private fun addBrandHeader(root: LinearLayout) {
+        root.addView(BrandBarView(this, KioskBrand.SIGNATURE_BAR), LinearLayout.LayoutParams(MATCH, dp(BAR_DP)))
+        val logo = ImageView(this).apply {
+            setImageResource(R.drawable.mc_wordmark)
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_START
+        }
+        root.addView(logo, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(LOGO_DP)).apply {
+            topMargin = dp(LOGO_TOP_DP)
+        })
+        val subtitle = text(getString(R.string.agent_subtitle), 14f, MUTED)
+        subtitle.setPadding(0, dp(SUBTITLE_GAP_DP), 0, dp(20))
+        root.addView(subtitle)
     }
 
     private fun label(s: String): TextView =
@@ -187,7 +206,7 @@ class MainActivity : ComponentActivity() {
         text = s
         setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
         setTextColor(color)
-        if (bold) setTypeface(typeface, Typeface.BOLD)
+        typeface = if (bold) BrandFonts.semibold(context) else BrandFonts.regular(context)
         if (mono) typeface = Typeface.MONOSPACE
     }
 
@@ -195,12 +214,16 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
-        val INK = Color.parseColor("#0E1117")
-        val TEXT = Color.parseColor("#E8EEF4")
-        val MUTED = Color.parseColor("#8693A4")
-        val FAINT = Color.parseColor("#5C6675")
-        val SIGNAL = Color.parseColor("#F4B942")
-        val OK = Color.parseColor("#3FD08A")
-        val ALERT = Color.parseColor("#F2545B")
+        // MeinConnect fork: light CI palette (design/ci tokens). INK is the page background here.
+        val INK = Color.parseColor("#F4F5F7")
+        val TEXT = Color.parseColor("#111418")
+        val MUTED = Color.parseColor("#5B6470")
+        val FAINT = Color.parseColor("#8A929C")
+        val OK = Color.parseColor("#1F8A4C")
+        val ALERT = Color.parseColor("#C6261D")
+        const val BAR_DP = 4
+        const val LOGO_DP = 32
+        const val LOGO_TOP_DP = 24
+        const val SUBTITLE_GAP_DP = 6
     }
 }

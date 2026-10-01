@@ -1,8 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">MDM Agent</string>
+    <string name="app_name" translatable="false">MeinConnect MDM</string>
     <string name="device_admin_description">Lets this organisation manage the device: apply policies, manage apps, and run remote support.</string>
     <string name="checkin_notification_channel">Device management</string>
     <string name="checkin_notification_title">Device management active</string>
     <string name="checkin_notification_text">Keeping this device in sync with your organisation.</string>
+
+    <!-- MeinConnect fork: kiosk launcher + status screen -->
+    <string name="kiosk_loading">Starting…</string>
+    <string name="kiosk_idle_title">Managed device</string>
+    <string name="kiosk_idle_body">This device is managed centrally.</string>
+    <string name="kiosk_empty">No apps available yet. Add installed apps to this kiosk\'s allowed list.</string>
+    <string name="kiosk_recovery_title">Kiosk mode stopped</string>
+    <string name="kiosk_recovery_body">An app crashed repeatedly, so kiosk mode was switched off to keep this device usable.</string>
+    <string name="kiosk_exit">Exit kiosk</string>
+    <string name="kiosk_exit_hint">Admin password</string>
+    <string name="kiosk_exit_confirm">Exit</string>
+    <string name="kiosk_exit_cancel">Cancel</string>
+    <string name="kiosk_exit_wrong">Wrong password</string>
+    <string name="agent_subtitle">Device agent</string>
+    <string name="agent_managed_by">Managed with MeinConnect</string>
 </resources>

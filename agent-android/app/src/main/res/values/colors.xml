@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#0B3D91</color>
+    <!-- MeinConnect fork: launcher icon sits on white (the wordmark is colour on light). -->
+    <color name="ic_launcher_background">#FFFFFF</color>
 </resources>

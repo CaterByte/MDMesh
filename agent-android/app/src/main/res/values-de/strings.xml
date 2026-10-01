@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="device_admin_description">Erlaubt dieser Organisation, das Gerät zu verwalten: Richtlinien anwenden, Apps verwalten und Fernsupport leisten.</string>
+    <string name="checkin_notification_channel">Geräteverwaltung</string>
+    <string name="checkin_notification_title">Geräteverwaltung aktiv</string>
+    <string name="checkin_notification_text">Hält dieses Gerät mit deiner Organisation synchron.</string>
+
+    <string name="kiosk_loading">Wird gestartet …</string>
+    <string name="kiosk_idle_title">Verwaltetes Gerät</string>
+    <string name="kiosk_idle_body">Dieses Gerät wird zentral verwaltet.</string>
+    <string name="kiosk_empty">Noch keine Apps verfügbar. Füge installierte Apps zur Freigabeliste dieses Kiosks hinzu.</string>
+    <string name="kiosk_recovery_title">Kiosk-Modus beendet</string>
+    <string name="kiosk_recovery_body">Eine App ist wiederholt abgestürzt. Damit das Gerät bedienbar bleibt, wurde der Kiosk-Modus beendet.</string>
+    <string name="kiosk_exit">Kiosk verlassen</string>
+    <string name="kiosk_exit_hint">Admin-Passwort</string>
+    <string name="kiosk_exit_confirm">Verlassen</string>
+    <string name="kiosk_exit_cancel">Abbrechen</string>
+    <string name="kiosk_exit_wrong">Falsches Passwort</string>
+    <string name="agent_subtitle">Geräte-Agent</string>
+    <string name="agent_managed_by">Verwaltet mit MeinConnect</string>
+</resources>

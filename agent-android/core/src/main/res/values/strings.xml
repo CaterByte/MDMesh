@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- MeinConnect fork: user-visible notification channel name (was the literal "MDMesh alerts"). -->
+    <string name="mc_alert_channel_name">Device alerts</string>
+</resources>
