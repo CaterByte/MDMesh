@@ -77,6 +77,10 @@ public interface ConfigurationMapper {
             "iconSize=#{iconSize}, " +
             "desktopHeader=#{desktopHeader}, " +
             "desktopHeaderTemplate=#{desktopHeaderTemplate}, " +
+            "kioskTitle=#{kioskTitle}, " +
+            "kioskLogoUrl=#{kioskLogoUrl}, " +
+            "kioskAccentColor=#{kioskAccentColor}, " +
+            "kioskBrandBar=#{kioskBrandBar}, " +
             "displayStatus=#{displayStatus}, " +
             "requestUpdates=#{requestUpdates}, " +
             "disableLocation=#{disableLocation}, " +

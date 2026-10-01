@@ -27,7 +27,9 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * Visual theme for {@link DesiredKiosk}: background/text colors and launcher icon size.
+ * Visual theme for {@link DesiredKiosk}: background/text colors and launcher icon size, plus the MeinConnect
+ * branding fields (title, logo, accent, background image, brand bar). Every field is optional; the agent
+ * falls back to its built-in brand defaults for anything absent.
  */
 @Getter
 @Setter
@@ -37,4 +39,11 @@ public class DesiredKioskTheme {
     private String backgroundColor;
     private String textColor;
     private String iconSize;
+    // MeinConnect fork
+    private String title;
+    private String logoUrl;
+    private String accentColor;
+    private String backgroundImageUrl;
+    /** {@code none} or a hard-stop list {@code #RRGGBB:END%,…}, e.g. {@code #0957c3:40,#593c90:64,#aa205d:84,#fa052a:100}. */
+    private String brandBar;
 }

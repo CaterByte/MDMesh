@@ -23,7 +23,12 @@
         "features": { "type": "object", "properties": { "home": {"type":"boolean"}, "recents": {"type":"boolean"}, "notifications": {"type":"boolean"}, "systemInfo": {"type":"boolean"}, "keyguard": {"type":"boolean"}, "lockButtons": {"type":"boolean"} } },
         "exitMode": { "enum": ["gesture", "visible", "remote"] },
         "password": { "type": "string" },
-        "theme": { "type": "object", "properties": { "backgroundColor": {"type":"string"}, "textColor": {"type":"string"}, "iconSize": {"type":"string"} } }
+        "theme": { "type": "object", "properties": { "backgroundColor": {"type":"string"}, "textColor": {"type":"string"}, "iconSize": {"type":"string"},
+          "title": {"type":"string", "description":"MeinConnect fork: header title"},
+          "logoUrl": {"type":"string", "description":"MeinConnect fork: header logo URL (PNG/JPEG/WebP)"},
+          "accentColor": {"type":"string", "description":"MeinConnect fork: #RRGGBB accent"},
+          "backgroundImageUrl": {"type":"string", "description":"MeinConnect fork: launcher background image URL"},
+          "brandBar": {"type":"string", "description":"MeinConnect fork: 'none' or hard stops '#RRGGBB:END%,...'"} } }
       }
     },
     "location": { "type": "object", "properties": { "mode": { "enum": ["passive", "active"] } } }

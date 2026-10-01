@@ -99,6 +99,34 @@ public class DesiredConfigBuilderTest {
         assertEquals(b.getRevision(), DesiredConfigBuilder.revision(a));
     }
 
+    @Test
+    public void kiosk_theme_carries_meinconnect_branding_and_drops_blank_fields() {
+        Configuration c = kioskConfig();
+        c.setKioskTitle("  Küche Nord  "); c.setKioskLogoUrl("https://meinconnect.app/logo/kiosk.png");
+        c.setKioskAccentColor("#0957c3"); c.setKioskBrandBar("#0957c3:40,#593c90:64,#aa205d:84,#fa052a:100");
+        c.setBackgroundImageUrl("   "); c.setTextColor("");
+        DesiredConfig d = DesiredConfigBuilder.build(c, Arrays.asList(app(5, 505, "com.acme.pos", 1)));
+        assertEquals("Küche Nord", d.getKiosk().getTheme().getTitle());
+        assertEquals("https://meinconnect.app/logo/kiosk.png", d.getKiosk().getTheme().getLogoUrl());
+        assertEquals("#0957c3", d.getKiosk().getTheme().getAccentColor());
+        assertEquals("#0957c3:40,#593c90:64,#aa205d:84,#fa052a:100", d.getKiosk().getTheme().getBrandBar());
+        assertNull("blank background image = agent default", d.getKiosk().getTheme().getBackgroundImageUrl());
+        assertNull("blank text color = agent default", d.getKiosk().getTheme().getTextColor());
+        String json = DesiredConfigBuilder.canonicalJson(d);
+        assertTrue(json.contains("\"brandBar\""));
+        assertFalse(json.contains("\"textColor\""));
+    }
+
+    @Test
+    public void unbranded_config_keeps_its_revision() {
+        // Adding the branding fields must not change the revision of configurations that don't use them.
+        DesiredConfig d = DesiredConfigBuilder.build(kioskConfig(), Arrays.asList(app(5, 505, "com.acme.pos", 1)));
+        String json = DesiredConfigBuilder.canonicalJson(d);
+        assertFalse(json.contains("\"title\""));
+        assertFalse(json.contains("\"logoUrl\""));
+        assertFalse(json.contains("\"brandBar\""));
+    }
+
     /** GOLDEN: any change to canonicalisation changes every device's revision fleet-wide. Update deliberately. */
     @Test
     public void golden_canonical_json_and_revision() {

@@ -192,6 +192,16 @@ public class Configuration implements CustomerData, Serializable {
     @ApiModelProperty("If checked, the data of the device status bar (time, battery, etc) are displayed by Headwind MDM")
     private boolean displayStatus;
 
+    // MeinConnect: kiosk launcher branding (sent to the agent in DesiredKioskTheme; null/blank = agent default)
+    @ApiModelProperty("Kiosk launcher title shown in the header")
+    private String kioskTitle;
+    @ApiModelProperty("URL of a PNG/JPEG/WebP logo shown in the kiosk header")
+    private String kioskLogoUrl;
+    @ApiModelProperty("Kiosk accent color (#RRGGBB) for buttons and highlights")
+    private String kioskAccentColor;
+    @ApiModelProperty("Kiosk brand bar: 'none' or hard-stop list '#RRGGBB:END%,…' (e.g. #0957c3:40,#593c90:64)")
+    private String kioskBrandBar;
+
     // An unique key used for retrieving the QR code for configuration
     @ApiModelProperty(hidden = true)
     private String qrCodeKey;
@@ -320,6 +330,38 @@ public class Configuration implements CustomerData, Serializable {
 
     public void setDesktopHeaderTemplate(String desktopHeaderTemplate) {
         this.desktopHeaderTemplate = desktopHeaderTemplate;
+    }
+
+    public String getKioskTitle() {
+        return kioskTitle;
+    }
+
+    public void setKioskTitle(String kioskTitle) {
+        this.kioskTitle = kioskTitle;
+    }
+
+    public String getKioskLogoUrl() {
+        return kioskLogoUrl;
+    }
+
+    public void setKioskLogoUrl(String kioskLogoUrl) {
+        this.kioskLogoUrl = kioskLogoUrl;
+    }
+
+    public String getKioskAccentColor() {
+        return kioskAccentColor;
+    }
+
+    public void setKioskAccentColor(String kioskAccentColor) {
+        this.kioskAccentColor = kioskAccentColor;
+    }
+
+    public String getKioskBrandBar() {
+        return kioskBrandBar;
+    }
+
+    public void setKioskBrandBar(String kioskBrandBar) {
+        this.kioskBrandBar = kioskBrandBar;
     }
 
     public boolean isDisplayStatus() {
@@ -948,6 +990,10 @@ public class Configuration implements CustomerData, Serializable {
         copy.setDesktopHeader(getDesktopHeader());
         copy.setDesktopHeaderTemplate(getDesktopHeaderTemplate());
         copy.setDisplayStatus(isDisplayStatus());
+        copy.setKioskTitle(getKioskTitle());
+        copy.setKioskLogoUrl(getKioskLogoUrl());
+        copy.setKioskAccentColor(getKioskAccentColor());
+        copy.setKioskBrandBar(getKioskBrandBar());
 
         copy.setDefaultFilePath(getDefaultFilePath());
 

@@ -641,7 +641,18 @@ function FieldControl({ def, value, apps, assigned, disabled, onChange }: { def:
     case 'time':
       return <input className="input" type="time" value={value == null ? '' : String(value)} disabled={disabled} onChange={(e) => onChange(e.target.value || null)} />;
     case 'color':
-      return <input type="color" value={value ? String(value) : '#ffffff'} disabled={disabled} onChange={(e) => onChange(e.target.value)} />;
+      // MeinConnect fork: a native color input can't be emptied, so offer a reset back to "unset"
+      // (unset = the agent's built-in brand default).
+      return (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <input type="color" value={value ? String(value) : '#ffffff'} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
+          {value ? (
+            <button type="button" className="btn btn-ghost btn-sm" disabled={disabled} onClick={() => onChange(null)}>Reset</button>
+          ) : (
+            <span className="muted" style={{ fontSize: 12 }}>default</span>
+          )}
+        </span>
+      );
     case 'password':
       return <input className="input" type="password" value={value == null ? '' : String(value)} disabled={disabled} onChange={(e) => onChange(e.target.value)} autoComplete="new-password" />;
     default:

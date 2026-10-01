@@ -116,7 +116,12 @@ export const CONFIG_FIELDS: FieldDef[] = [
   { key: 'useDefaultDesignSettings', label: 'Default launcher design', type: 'switch', group: 'Display', help: 'Use the stock launcher look (ignore the custom colors below).' },
   { key: 'backgroundColor', label: 'Background color', type: 'color', group: 'Display', enforced: true, help: 'Launcher background color.' },
   { key: 'textColor', label: 'Text color', type: 'color', group: 'Display', enforced: true, help: 'Launcher text color.' },
-  { key: 'backgroundImageUrl', label: 'Background image URL', type: 'text', group: 'Display', help: 'URL of a custom launcher background image.' },
+  { key: 'backgroundImageUrl', label: 'Background image URL', type: 'text', group: 'Display', enforced: true, help: 'URL of a launcher background image (PNG/JPEG/WebP, shown "cover"). Empty = plain background color.' },
+  // MeinConnect fork: kiosk launcher branding. Empty = the agent's built-in MeinConnect defaults.
+  { key: 'kioskTitle', label: 'Kiosk title', type: 'text', group: 'Display', enforced: true, help: 'Header title on the kiosk launcher, e.g. the site name. Empty = no title.' },
+  { key: 'kioskLogoUrl', label: 'Kiosk logo URL', type: 'text', group: 'Display', enforced: true, help: 'PNG/JPEG/WebP logo for the kiosk header (white-label). Empty = MeinConnect logo.' },
+  { key: 'kioskAccentColor', label: 'Kiosk accent color', type: 'color', group: 'Display', enforced: true, help: 'Accent for buttons and highlights. Empty = MeinConnect blue #0957c3.' },
+  { key: 'kioskBrandBar', label: 'Kiosk brand bar', type: 'text', group: 'Display', enforced: true, help: "Top brand bar as hard stops '#RRGGBB:END%,…' (e.g. #0957c3:40,#593c90:64,#aa205d:84,#fa052a:100) or 'none'. Empty = MeinConnect signature bar." },
   { key: 'iconSize', label: 'Icon size', type: 'enum', group: 'Display', enforced: true, help: 'App icon size on the launcher.', options: [
     { value: 'SMALL', label: 'Small' }, { value: 'MEDIUM', label: 'Medium' }, { value: 'LARGE', label: 'Large' },
   ] },
@@ -157,4 +162,6 @@ export const ENFORCED_KEYS: ReadonlySet<string> = new Set(ENFORCED_FIELDS.map((f
 export const KIOSK_AFFECTING_KEYS: ReadonlySet<string> = new Set([
   'kioskMode', 'mainAppId', 'kioskExit', 'kioskHome', 'kioskRecents', 'kioskNotifications', 'kioskSystemInfo',
   'kioskKeyguard', 'kioskLockButtons', 'password', 'backgroundColor', 'textColor', 'iconSize', 'applications',
+  // MeinConnect fork: branding fields travel in the kiosk payload, so changing them re-applies kiosk.
+  'backgroundImageUrl', 'kioskTitle', 'kioskLogoUrl', 'kioskAccentColor', 'kioskBrandBar',
 ]);

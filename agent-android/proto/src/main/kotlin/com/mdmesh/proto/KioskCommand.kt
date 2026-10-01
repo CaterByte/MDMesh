@@ -36,9 +36,19 @@ data class KioskFeaturesDto(
     val lockButtons: Boolean? = null,
 )
 
+/**
+ * Launcher appearance. All optional; absent = the agent's built-in brand default.
+ * The fields after [iconSize] are MeinConnect-fork additions (see docs/meinconnect/README.md).
+ */
 @Serializable
 data class KioskThemeDto(
     val backgroundColor: String? = null,
     val textColor: String? = null,
     val iconSize: String? = null,
+    val title: String? = null,
+    val logoUrl: String? = null,
+    val accentColor: String? = null,
+    val backgroundImageUrl: String? = null,
+    /** `none` or hard stops `#RRGGBB:END%,…`; null = MeinConnect signature bar. */
+    val brandBar: String? = null,
 )

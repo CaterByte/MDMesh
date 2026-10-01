@@ -101,10 +101,23 @@ public final class DesiredConfigBuilder {
         k.setExitMode(Boolean.TRUE.equals(cfg.getKioskExit()) ? "visible" : "gesture");
         k.setPassword(cfg.getPassword());
         DesiredKioskTheme t = new DesiredKioskTheme();
-        t.setBackgroundColor(cfg.getBackgroundColor()); t.setTextColor(cfg.getTextColor());
+        t.setBackgroundColor(blankToNull(cfg.getBackgroundColor())); t.setTextColor(blankToNull(cfg.getTextColor()));
         t.setIconSize(cfg.getIconSize() == null ? null : cfg.getIconSize().name());
+        // MeinConnect fork: launcher branding. Blank console fields mean "agent default", so they are
+        // dropped instead of sent as "" (which also keeps the desired-state revision of unbranded configs stable).
+        t.setTitle(blankToNull(cfg.getKioskTitle()));
+        t.setLogoUrl(blankToNull(cfg.getKioskLogoUrl()));
+        t.setAccentColor(blankToNull(cfg.getKioskAccentColor()));
+        t.setBackgroundImageUrl(blankToNull(cfg.getBackgroundImageUrl()));
+        t.setBrandBar(blankToNull(cfg.getKioskBrandBar()));
         k.setTheme(t);
         return k;
+    }
+
+    private static String blankToNull(String v) {
+        if (v == null) return null;
+        String t = v.trim();
+        return t.isEmpty() ? null : t;
     }
 
     /** Recursively sorts map keys and drops null values so nested objects canonicalise too. */

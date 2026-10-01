@@ -2850,4 +2850,22 @@
         </rollback>
     </changeSet>
 
+    <!-- MeinConnect fork: changesets prefixed "mc-" so upstream merges never collide on ids. -->
+    <changeSet id="mc-26.10.01-kiosk-branding" author="meinconnect" context="common">
+        <comment>Kiosk launcher branding per configuration: header title, logo URL, accent color and the
+            hard-stop brand bar. NULL = the agent's built-in brand defaults.</comment>
+        <sql>
+            ALTER TABLE configurations ADD COLUMN kioskTitle VARCHAR(100);
+            ALTER TABLE configurations ADD COLUMN kioskLogoUrl VARCHAR(500);
+            ALTER TABLE configurations ADD COLUMN kioskAccentColor VARCHAR(20);
+            ALTER TABLE configurations ADD COLUMN kioskBrandBar VARCHAR(200);
+        </sql>
+        <rollback>
+            ALTER TABLE configurations DROP COLUMN kioskBrandBar;
+            ALTER TABLE configurations DROP COLUMN kioskAccentColor;
+            ALTER TABLE configurations DROP COLUMN kioskLogoUrl;
+            ALTER TABLE configurations DROP COLUMN kioskTitle;
+        </rollback>
+    </changeSet>
+
 </databaseChangeLog>
