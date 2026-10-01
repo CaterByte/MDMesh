@@ -13,7 +13,10 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.mdmesh.agent"
+        // MeinConnect fork: own applicationId (bound to the own release key). The Kotlin namespace stays
+        // com.mdmesh.agent, so component class names (AdminReceiver, KioskHomeAlias…) are unchanged.
+        // Override with -PmdmApplicationId=… only for experiments — enrolled devices are bound to this id.
+        applicationId = (project.findProperty("mdmApplicationId") as String?) ?: "de.meinconnect.mdm"
         minSdk = 24
         targetSdk = 35
         // Release CI overrides these from the git tag (see release/version.sh); the defaults are the

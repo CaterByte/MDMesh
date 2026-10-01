@@ -2,7 +2,7 @@
 # MDMesh quick start — deploy from PUBLISHED images, no clone and no build. Needs only Docker.
 # Run from anywhere (the `bash <(...)` form keeps the prompts interactive):
 #
-#   bash <(curl -fsSL https://raw.githubusercontent.com/MDMesh-app/MDMesh/main/quickstart.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/CaterByte/MDMesh/main/quickstart.sh)
 #
 # It creates ./mdmesh, downloads the pull-only compose + seed, generates secrets, brings the stack
 # up, and prints the console URL + a temporary admin password (you set your own on first login).
@@ -12,9 +12,9 @@ set -euo pipefail
 # it for this script and its children.
 unset CDPATH
 
-REPO="MDMesh-app/MDMesh"
+REPO="CaterByte/MDMesh"   # MeinConnect fork (upstream: MDMesh-app/MDMesh)
 BRANCH="main"   # where the compose + seed come from only when the release can't be resolved (see below)
-IMAGE_OWNER_DEFAULT="mdmesh-app"
+IMAGE_OWNER_DEFAULT="caterbyte"
 
 say()  { printf '\033[1;36m%s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m%s\033[0m\n' "$*"; }

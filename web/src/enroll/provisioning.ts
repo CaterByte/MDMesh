@@ -2,13 +2,13 @@
 // SERVER_URL extra, so one prebuilt APK works for any deployment (the agent reads it at enrollment).
 //
 // Deploy-specific values default to the shipped debug build and can be overridden at web-build time:
-//   VITE_AGENT_PACKAGE     applicationId of the distributed APK (default com.mdmesh.agent.debug)
+//   VITE_AGENT_PACKAGE     applicationId of the distributed APK (default de.meinconnect.mdm.debug — MeinConnect fork)
 //   VITE_AGENT_CHECKSUM    PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM of the signing cert
 //   VITE_AGENT_APK_URL     where the APK is hosted (default <origin>/files/agent.apk)
 
 const env = import.meta.env as Record<string, string | undefined>;
 
-const AGENT_PACKAGE = env.VITE_AGENT_PACKAGE || 'com.mdmesh.agent.debug';
+const AGENT_PACKAGE = env.VITE_AGENT_PACKAGE || 'de.meinconnect.mdm.debug';
 const ADMIN_COMPONENT = `${AGENT_PACKAGE}/com.mdmesh.agent.admin.AdminReceiver`;
 const SIGNATURE_CHECKSUM = env.VITE_AGENT_CHECKSUM || 'YMEWhg_-ydciRFgtdOZbQ-W_aPPz7orHKuqfn13Ujaw';
 

@@ -291,7 +291,7 @@ print({"apk":asset("mdmesh-agent.apk"),"manifest":asset("manifest.json")}.get(sy
       warn "The release manifest's APK signing checksum is malformed (not 43 base64url characters) — the console keeps its debug enrollment defaults."
     elif gh_curl -fsSL "$APK_URL" -o "$TMP_APK" 2>/dev/null && [ -n "$AGENT_CK" ] \
        && [ "$(sha256sum "$TMP_APK" | awk '{print $1}')" = "$WANT_SHA" ]; then
-      VITE_AGENT_PACKAGE="com.mdmesh.agent"; VITE_AGENT_CHECKSUM="$AGENT_CK"; VITE_AGENT_APK_URL="/files/agent.apk"
+      VITE_AGENT_PACKAGE="${AGENT_PACKAGE:-de.meinconnect.mdm}"; VITE_AGENT_CHECKSUM="$AGENT_CK"; VITE_AGENT_APK_URL="/files/agent.apk"  # MeinConnect fork applicationId
       say "Release APK verified (signing checksum ${AGENT_CK}) — the QR will point at /files/agent.apk."
     else
       warn "Could not fetch/verify the release APK — the console keeps its debug enrollment defaults."

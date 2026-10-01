@@ -23,6 +23,9 @@ jobs:
       # Per-run local tag for the smoked supervisor build (never pushed under this name): unique so a shared
       # daemon can't swap in another run's image between the smoke and the push that retags it.
       SUP_IMG: mdmesh-supervisor:smoke-${{ github.run_id }}-${{ github.run_attempt }}
+      # MeinConnect fork: agent applicationId baked into the console's enrollment QR + rollout panel.
+      # Must match applicationId in agent-android/app/build.gradle.kts.
+      AGENT_PACKAGE: de.meinconnect.mdm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
@@ -109,7 +112,7 @@ jobs:
           O=$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')
           IMG="ghcr.io/${O}/mdmesh-web"
           docker build -f docker/web.Dockerfile \
-            --build-arg VITE_AGENT_PACKAGE=com.mdmesh.agent \
+            --build-arg VITE_AGENT_PACKAGE="$AGENT_PACKAGE" \
             --build-arg VITE_AGENT_CHECKSUM="$CK" \
             --build-arg VITE_AGENT_APK_URL=/files/agent.apk \
             --build-arg VITE_APP_VERSION="$VERSION" \

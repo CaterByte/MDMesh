@@ -1,7 +1,7 @@
 # Pull-only MDMesh stack — no build context, every service runs a published GHCR image. This is the
 # "no clone, no build" deploy. Easiest via quickstart.sh, or by hand:
 #
-#   curl -fsSLO https://raw.githubusercontent.com/MDMesh-app/MDMesh/main/docker-compose.release.yml
+#   curl -fsSLO https://raw.githubusercontent.com/CaterByte/MDMesh/main/docker-compose.release.yml
 #   # write a .env (DB_PASSWORD, HASH_SECRET, BASE_URL, IMAGE_OWNER, …) — see quickstart.sh
 #   docker compose -f docker-compose.release.yml --profile cloudflare up -d                 # tunnel
 #   docker compose -f docker-compose.release.yml -f docker-compose.domain.yml up -d         # own domain
@@ -24,7 +24,7 @@ services:
       retries: 20
 
   server:
-    image: ghcr.io/${IMAGE_OWNER:-mdmesh-app}/mdmesh-server:${SERVER_VERSION:-latest}
+    image: ghcr.io/${IMAGE_OWNER:-caterbyte}/mdmesh-server:${SERVER_VERSION:-latest}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -52,7 +52,7 @@ services:
       - mdmeshdata:/opt/mdmesh
 
   caddy:
-    image: ghcr.io/${IMAGE_OWNER:-mdmesh-app}/mdmesh-web:${WEB_VERSION:-latest}
+    image: ghcr.io/${IMAGE_OWNER:-caterbyte}/mdmesh-web:${WEB_VERSION:-latest}
     restart: unless-stopped
     depends_on:
       - server
@@ -65,7 +65,7 @@ services:
       - caddy_config:/config
 
   supervisor:
-    image: ghcr.io/${IMAGE_OWNER:-mdmesh-app}/mdmesh-supervisor:${SUPERVISOR_VERSION:-latest}
+    image: ghcr.io/${IMAGE_OWNER:-caterbyte}/mdmesh-supervisor:${SUPERVISOR_VERSION:-latest}
     restart: unless-stopped
     environment:
       GITHUB_REPO: ${GITHUB_REPO:-}

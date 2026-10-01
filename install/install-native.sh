@@ -590,7 +590,7 @@ print({"apk":asset("mdmesh-agent.apk"),"manifest":asset("manifest.json"),
   }
   fetch_agent_apk
   if [ -n "$AGENT_APK" ]; then
-    export VITE_AGENT_PACKAGE="com.mdmesh.agent" VITE_AGENT_CHECKSUM="$AGENT_CK" VITE_AGENT_APK_URL="/files/agent.apk"
+    export VITE_AGENT_PACKAGE="${AGENT_PACKAGE:-de.meinconnect.mdm}" VITE_AGENT_CHECKSUM="$AGENT_CK" VITE_AGENT_APK_URL="/files/agent.apk"  # MeinConnect fork applicationId
     ok "release agent APK fetched: manifest signature verified, sha256 matches (checksum ${AGENT_CK})"
   else
     agent_fetch_cleanup
