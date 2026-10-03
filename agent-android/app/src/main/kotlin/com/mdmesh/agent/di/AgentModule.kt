@@ -174,10 +174,17 @@ object AgentModule {
         security = { security.collect() },
     )
 
-    /** The supported toggle policies, keyed by capability key (data-driven routing). */
+    /**
+     * The supported toggle policies, keyed by capability key (data-driven routing).
+     *
+     * MeinConnect fork: a LIVE view, re-probed on every access. The singleton [ConfigApplier] used to capture
+     * this map once — when that happened during provisioning, before the agent was Device Owner, every
+     * factory probe failed and the map stayed empty for the life of the process, so each config.apply
+     * reported wifi/bluetooth/usbStorage as "unsupported" although the advertised capabilities (probed live)
+     * said otherwise. Probing is a few isDeviceOwnerApp checks, so doing it per lookup is cheap.
+     */
     @Provides
-    fun providePolicyToggles(registry: CapabilityRegistry): Map<String, TogglePolicy> =
-        registry.togglePolicies()
+    fun providePolicyToggles(registry: CapabilityRegistry): Map<String, TogglePolicy> = LiveTogglePolicies(registry)
 
     // --- Command handlers (multibound). Add a command == add one @IntoSet provider. ---
 
