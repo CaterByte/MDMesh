@@ -61,12 +61,16 @@ export const CONFIG_FIELDS: FieldDef[] = [
   { key: 'kioskExit', label: 'Kiosk exit button', type: 'tri', group: 'Kiosk', enforced: true, help: 'Show a button to leave kiosk mode.' },
   { key: 'kioskHome', label: 'Home button', type: 'tri', group: 'Kiosk', enforced: true, help: 'Allow the Home button while in kiosk.' },
   { key: 'kioskRecents', label: 'Recents button', type: 'tri', group: 'Kiosk', enforced: true, help: 'Allow the Recent-apps button while in kiosk.' },
-  { key: 'kioskNotifications', label: 'Notifications', type: 'tri', group: 'Kiosk', enforced: true, help: 'Allow the notification shade while in kiosk.' },
+  { key: 'kioskNotifications', label: 'Notifications', type: 'tri', group: 'Kiosk', enforced: true, help: 'Show notifications (banners + shade) while in kiosk. Android requires the Home button for this; the MeinConnect agent switches it on automatically and grants kiosk apps the notification permission.' },
   { key: 'kioskSystemInfo', label: 'System info', type: 'tri', group: 'Kiosk', enforced: true, help: 'Show the status/system-info bar while in kiosk.' },
   { key: 'kioskKeyguard', label: 'Lock screen', type: 'tri', group: 'Kiosk', enforced: true, help: 'Allow the keyguard / lock screen while in kiosk.' },
   { key: 'kioskLockButtons', label: 'Lock hardware buttons', type: 'tri', group: 'Kiosk', enforced: true, help: 'Disable power/volume buttons while in kiosk.' },
   { key: 'kioskScreenOn', label: 'Keep screen on', type: 'tri', group: 'Kiosk', help: 'Force the screen to stay awake while in kiosk.' },
   { key: 'showWifi', label: 'Show Wi-Fi on error', type: 'tri', group: 'Kiosk', help: 'Surface Wi-Fi settings if the device loses connectivity in kiosk.' },
+  // MeinConnect fork: quick settings on the kiosk launcher — only these are reachable, Android Settings stay locked.
+  { key: 'kioskQsWifi', label: 'Quick setting: Wi-Fi', type: 'switch', group: 'Kiosk', enforced: true, help: 'Show a Wi-Fi picker on the kiosk launcher (pick a network, enter its password). Needs location services on to list networks.' },
+  { key: 'kioskQsBrightness', label: 'Quick setting: brightness', type: 'switch', group: 'Kiosk', enforced: true, help: 'Show a screen-brightness slider on the kiosk launcher.' },
+  { key: 'kioskQsVolume', label: 'Quick setting: volume', type: 'switch', group: 'Kiosk', enforced: true, help: 'Show a volume slider (media + notifications) on the kiosk launcher.' },
 
   // ── Network ─────────────────────────────────────────────────────────────-─
   { key: 'wifi', label: 'Wi-Fi', type: 'tri', group: 'Network', focused: true, enforced: true, help: 'Wi-Fi radio: unmanaged, force on, or force off.' },
@@ -121,7 +125,7 @@ export const CONFIG_FIELDS: FieldDef[] = [
   { key: 'kioskTitle', label: 'Kiosk title', type: 'text', group: 'Display', enforced: true, help: 'Header title on the kiosk launcher, e.g. the site name. Empty = no title.' },
   { key: 'kioskLogoUrl', label: 'Kiosk logo URL', type: 'text', group: 'Display', enforced: true, help: 'PNG/JPEG/WebP logo for the kiosk header (white-label). Empty = MeinConnect logo.' },
   { key: 'kioskAccentColor', label: 'Kiosk accent color', type: 'color', group: 'Display', enforced: true, help: 'Accent for buttons and highlights. Empty = MeinConnect blue #0957c3.' },
-  { key: 'kioskBrandBar', label: 'Kiosk brand bar', type: 'text', group: 'Display', enforced: true, help: "Top brand bar as hard stops '#RRGGBB:END%,…' (e.g. #0957c3:40,#593c90:64,#aa205d:84,#fa052a:100) or 'none'. Empty = MeinConnect signature bar." },
+  { key: 'kioskBrandBar', label: 'Kiosk brand bar', type: 'text', group: 'Display', enforced: true, help: "Top brand bar, drawn as a smooth gradient through colour stops '#RRGGBB:END%,…' (e.g. #0957c3:40,#593c90:64,#aa205d:84,#fa052a:100) or 'none'. Empty = MeinConnect signature gradient." },
   { key: 'iconSize', label: 'Icon size', type: 'enum', group: 'Display', enforced: true, help: 'App icon size on the launcher.', options: [
     { value: 'SMALL', label: 'Small' }, { value: 'MEDIUM', label: 'Medium' }, { value: 'LARGE', label: 'Large' },
   ] },
@@ -164,4 +168,5 @@ export const KIOSK_AFFECTING_KEYS: ReadonlySet<string> = new Set([
   'kioskKeyguard', 'kioskLockButtons', 'password', 'backgroundColor', 'textColor', 'iconSize', 'applications',
   // MeinConnect fork: branding fields travel in the kiosk payload, so changing them re-applies kiosk.
   'backgroundImageUrl', 'kioskTitle', 'kioskLogoUrl', 'kioskAccentColor', 'kioskBrandBar',
+  'kioskQsWifi', 'kioskQsBrightness', 'kioskQsVolume',
 ]);

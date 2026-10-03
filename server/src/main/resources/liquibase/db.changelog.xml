@@ -2868,4 +2868,19 @@
         </rollback>
     </changeSet>
 
+    <changeSet id="mc-26.10.04-kiosk-quick-settings" author="meinconnect" context="common">
+        <comment>Kiosk quick settings per configuration: which of Wi-Fi / brightness / volume the launcher
+            offers. Off by default, so existing kiosks keep Android Settings fully locked.</comment>
+        <sql>
+            ALTER TABLE configurations ADD COLUMN kioskQsWifi BOOLEAN NOT NULL DEFAULT FALSE;
+            ALTER TABLE configurations ADD COLUMN kioskQsBrightness BOOLEAN NOT NULL DEFAULT FALSE;
+            ALTER TABLE configurations ADD COLUMN kioskQsVolume BOOLEAN NOT NULL DEFAULT FALSE;
+        </sql>
+        <rollback>
+            ALTER TABLE configurations DROP COLUMN kioskQsVolume;
+            ALTER TABLE configurations DROP COLUMN kioskQsBrightness;
+            ALTER TABLE configurations DROP COLUMN kioskQsWifi;
+        </rollback>
+    </changeSet>
+
 </databaseChangeLog>

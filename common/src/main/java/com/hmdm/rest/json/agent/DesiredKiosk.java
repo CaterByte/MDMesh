@@ -42,4 +42,6 @@ public class DesiredKiosk {
     private String exitMode;
     private String password;
     private DesiredKioskTheme theme;
+    /** MeinConnect fork: quick settings the launcher offers ("wifi", "brightness", "volume"); null = none. */
+    private List<String> quickSettings;
 }

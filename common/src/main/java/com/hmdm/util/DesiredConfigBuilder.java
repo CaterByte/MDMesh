@@ -111,7 +111,17 @@ public final class DesiredConfigBuilder {
         t.setBackgroundImageUrl(blankToNull(cfg.getBackgroundImageUrl()));
         t.setBrandBar(blankToNull(cfg.getKioskBrandBar()));
         k.setTheme(t);
+        k.setQuickSettings(quickSettings(cfg));
         return k;
+    }
+
+    /** MeinConnect fork: enabled quick settings in a fixed order; null when none (keeps old revisions stable). */
+    private static List<String> quickSettings(Configuration cfg) {
+        List<String> qs = new ArrayList<String>();
+        if (cfg.isKioskQsWifi()) qs.add("wifi");
+        if (cfg.isKioskQsBrightness()) qs.add("brightness");
+        if (cfg.isKioskQsVolume()) qs.add("volume");
+        return qs.isEmpty() ? null : qs;
     }
 
     private static String blankToNull(String v) {

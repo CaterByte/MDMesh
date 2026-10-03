@@ -81,6 +81,9 @@ public interface ConfigurationMapper {
             "kioskLogoUrl=#{kioskLogoUrl}, " +
             "kioskAccentColor=#{kioskAccentColor}, " +
             "kioskBrandBar=#{kioskBrandBar}, " +
+            "kioskQsWifi=#{kioskQsWifi}, " +
+            "kioskQsBrightness=#{kioskQsBrightness}, " +
+            "kioskQsVolume=#{kioskQsVolume}, " +
             "displayStatus=#{displayStatus}, " +
             "requestUpdates=#{requestUpdates}, " +
             "disableLocation=#{disableLocation}, " +

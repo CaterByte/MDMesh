@@ -118,6 +118,17 @@ public class DesiredConfigBuilderTest {
     }
 
     @Test
+    public void quick_settings_are_listed_in_fixed_order_and_absent_when_off() {
+        Configuration c = kioskConfig();
+        c.setKioskQsVolume(true); c.setKioskQsWifi(true);
+        DesiredConfig d = DesiredConfigBuilder.build(c, Arrays.asList(app(5, 505, "com.acme.pos", 1)));
+        assertEquals(Arrays.asList("wifi", "volume"), d.getKiosk().getQuickSettings());
+        DesiredConfig off = DesiredConfigBuilder.build(kioskConfig(), Arrays.asList(app(5, 505, "com.acme.pos", 1)));
+        assertNull(off.getKiosk().getQuickSettings());
+        assertFalse(DesiredConfigBuilder.canonicalJson(off).contains("quickSettings"));
+    }
+
+    @Test
     public void unbranded_config_keeps_its_revision() {
         // Adding the branding fields must not change the revision of configurations that don't use them.
         DesiredConfig d = DesiredConfigBuilder.build(kioskConfig(), Arrays.asList(app(5, 505, "com.acme.pos", 1)));

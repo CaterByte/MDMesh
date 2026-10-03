@@ -24,6 +24,8 @@ data class KioskApplyPayload(
     val exitMode: String = "gesture",
     val password: String? = null,
     val theme: KioskThemeDto = KioskThemeDto(),
+    /** MeinConnect fork: quick settings the launcher offers — any of `wifi`, `brightness`, `volume`. */
+    val quickSettings: List<String> = emptyList(),
 )
 
 @Serializable
@@ -49,6 +51,6 @@ data class KioskThemeDto(
     val logoUrl: String? = null,
     val accentColor: String? = null,
     val backgroundImageUrl: String? = null,
-    /** `none` or hard stops `#RRGGBB:END%,…`; null = MeinConnect signature bar. */
+    /** `none` or colour stops `#RRGGBB:END%,…` drawn as a gradient; null = MeinConnect signature gradient. */
     val brandBar: String? = null,
 )

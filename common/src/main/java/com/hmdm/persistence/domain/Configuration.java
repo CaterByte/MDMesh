@@ -199,8 +199,15 @@ public class Configuration implements CustomerData, Serializable {
     private String kioskLogoUrl;
     @ApiModelProperty("Kiosk accent color (#RRGGBB) for buttons and highlights")
     private String kioskAccentColor;
-    @ApiModelProperty("Kiosk brand bar: 'none' or hard-stop list '#RRGGBB:END%,…' (e.g. #0957c3:40,#593c90:64)")
+    @ApiModelProperty("Kiosk brand bar: 'none' or colour stops '#RRGGBB:END%,…' drawn as a gradient (e.g. #0957c3:40,#593c90:64)")
     private String kioskBrandBar;
+    // MeinConnect: which quick settings the kiosk launcher offers (everything else in Android Settings stays locked)
+    @ApiModelProperty("Kiosk quick setting: Wi-Fi picker")
+    private boolean kioskQsWifi;
+    @ApiModelProperty("Kiosk quick setting: brightness slider")
+    private boolean kioskQsBrightness;
+    @ApiModelProperty("Kiosk quick setting: volume slider")
+    private boolean kioskQsVolume;
 
     // An unique key used for retrieving the QR code for configuration
     @ApiModelProperty(hidden = true)
@@ -362,6 +369,30 @@ public class Configuration implements CustomerData, Serializable {
 
     public void setKioskBrandBar(String kioskBrandBar) {
         this.kioskBrandBar = kioskBrandBar;
+    }
+
+    public boolean isKioskQsWifi() {
+        return kioskQsWifi;
+    }
+
+    public void setKioskQsWifi(boolean kioskQsWifi) {
+        this.kioskQsWifi = kioskQsWifi;
+    }
+
+    public boolean isKioskQsBrightness() {
+        return kioskQsBrightness;
+    }
+
+    public void setKioskQsBrightness(boolean kioskQsBrightness) {
+        this.kioskQsBrightness = kioskQsBrightness;
+    }
+
+    public boolean isKioskQsVolume() {
+        return kioskQsVolume;
+    }
+
+    public void setKioskQsVolume(boolean kioskQsVolume) {
+        this.kioskQsVolume = kioskQsVolume;
     }
 
     public boolean isDisplayStatus() {
@@ -994,6 +1025,9 @@ public class Configuration implements CustomerData, Serializable {
         copy.setKioskLogoUrl(getKioskLogoUrl());
         copy.setKioskAccentColor(getKioskAccentColor());
         copy.setKioskBrandBar(getKioskBrandBar());
+        copy.setKioskQsWifi(isKioskQsWifi());
+        copy.setKioskQsBrightness(isKioskQsBrightness());
+        copy.setKioskQsVolume(isKioskQsVolume());
 
         copy.setDefaultFilePath(getDefaultFilePath());
 

@@ -44,6 +44,6 @@ public class DesiredKioskTheme {
     private String logoUrl;
     private String accentColor;
     private String backgroundImageUrl;
-    /** {@code none} or a hard-stop list {@code #RRGGBB:END%,…}, e.g. {@code #0957c3:40,#593c90:64,#aa205d:84,#fa052a:100}. */
+    /** {@code none} or colour stops {@code #RRGGBB:END%,…} drawn as a gradient, e.g. {@code #0957c3:40,#593c90:64,#aa205d:84,#fa052a:100}. */
     private String brandBar;
 }

@@ -35,7 +35,8 @@
                                     kioskNotifications, kioskSystemInfo, kioskKeyguard, kioskLockButtons, kioskScreenOn, launcherUrl, restrictions, autoUpdate,
                                     blockStatusBar, systemUpdateType, systemUpdateFrom, systemUpdateTo,
                                     scheduleAppUpdate, appUpdateFrom, appUpdateTo, downloadUpdates, defaultFilePath,
-                                    kioskTitle, kioskLogoUrl, kioskAccentColor, kioskBrandBar)
+                                    kioskTitle, kioskLogoUrl, kioskAccentColor, kioskBrandBar,
+                                    kioskQsWifi, kioskQsBrightness, kioskQsVolume)
         VALUES (#{name}, #{description}, #{type}, #{password}, #{backgroundColor}, #{textColor}, #{backgroundImageUrl},
                 #{iconSize}, #{desktopHeader}, #{desktopHeaderTemplate}, #{displayStatus}, #{useDefaultDesignSettings}, #{customerId},
                 #{gps}, #{bluetooth}, #{wifi}, #{mobileData}, #{usbStorage}, #{requestUpdates}, #{disableLocation}, #{appPermissions},
@@ -47,7 +48,8 @@
                 #{kioskNotifications}, #{kioskSystemInfo}, #{kioskKeyguard}, #{kioskLockButtons}, #{kioskScreenOn}, #{launcherUrl}, #{restrictions}, #{autoUpdate},
                 #{blockStatusBar}, #{systemUpdateType}, #{systemUpdateFrom}, #{systemUpdateTo},
                 #{scheduleAppUpdate}, #{appUpdateFrom}, #{appUpdateTo}, #{downloadUpdates}, #{defaultFilePath},
-                #{kioskTitle}, #{kioskLogoUrl}, #{kioskAccentColor}, #{kioskBrandBar})
+                #{kioskTitle}, #{kioskLogoUrl}, #{kioskAccentColor}, #{kioskBrandBar},
+                #{kioskQsWifi}, #{kioskQsBrightness}, #{kioskQsVolume})
     </insert>
 
     <insert id="insertConfigurationApplications">
