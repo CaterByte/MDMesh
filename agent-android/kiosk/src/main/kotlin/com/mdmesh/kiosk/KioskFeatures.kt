@@ -23,10 +23,15 @@ data class KioskToggles(
  * ([DevicePolicyManager.LOCK_TASK_FEATURE_GLOBAL_ACTIONS]) is ON by default — that is the
  * framework's own default in lock-task — and is removed only when [KioskToggles.lockButtons]
  * is explicitly `true` ("lock the hardware buttons").
+ *
+ * MeinConnect fork: Android only accepts NOTIFICATIONS and OVERVIEW together with HOME —
+ * `setLockTaskFeatures` throws otherwise and the whole kiosk enter fails — so either of them
+ * switches HOME on as well.
  */
 fun lockTaskFeatures(t: KioskToggles): Int {
     var f = 0
-    if (t.home == true) f = f or DevicePolicyManager.LOCK_TASK_FEATURE_HOME
+    val needsHome = t.home == true || t.notifications == true || t.recents == true
+    if (needsHome) f = f or DevicePolicyManager.LOCK_TASK_FEATURE_HOME
     if (t.recents == true) f = f or DevicePolicyManager.LOCK_TASK_FEATURE_OVERVIEW
     if (t.notifications == true) f = f or DevicePolicyManager.LOCK_TASK_FEATURE_NOTIFICATIONS
     if (t.systemInfo == true) f = f or DevicePolicyManager.LOCK_TASK_FEATURE_SYSTEM_INFO

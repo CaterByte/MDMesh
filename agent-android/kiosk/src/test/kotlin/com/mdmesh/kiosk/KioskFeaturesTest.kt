@@ -25,6 +25,16 @@ class KioskFeaturesTest {
     }
 
     @Test
+    fun `notifications and recents pull in home, which Android requires for them`() {
+        // NOTIFICATIONS 2 | HOME 4 | GLOBAL_ACTIONS 16
+        assertEquals(22, lockTaskFeatures(KioskToggles(notifications = true)))
+        // OVERVIEW 8 | HOME 4 | GLOBAL_ACTIONS 16
+        assertEquals(28, lockTaskFeatures(KioskToggles(recents = true)))
+        // explicitly off home is overridden only because notifications need it
+        assertEquals(6, lockTaskFeatures(KioskToggles(home = false, notifications = true, lockButtons = true)))
+    }
+
+    @Test
     fun `lockButtons removes the power menu`() {
         assertEquals(0, lockTaskFeatures(KioskToggles(lockButtons = true)))
         // with other toggles, global actions is still removed
