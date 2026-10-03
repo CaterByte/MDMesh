@@ -1,8 +1,11 @@
 package com.mdmesh.agent
 
+import android.Manifest
 import android.app.ActivityManager
+import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -18,9 +21,15 @@ import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import com.mdmesh.agent.brand.BrandAssets
+import com.mdmesh.agent.brand.BrandParts
+import com.mdmesh.agent.brand.HomeModel
 import com.mdmesh.agent.brand.KioskScreens
 import com.mdmesh.agent.brand.LauncherApp
+import com.mdmesh.agent.brand.LightAndSound
+import com.mdmesh.agent.brand.QuickSheet
+import com.mdmesh.agent.brand.QuickTab
 import com.mdmesh.agent.brand.RemoteImages
+import com.mdmesh.agent.brand.WifiControl
 import com.mdmesh.agent.service.CheckInService
 import com.mdmesh.core.store.KioskStateStore
 import com.mdmesh.core.telemetry.EventSink
@@ -28,6 +37,7 @@ import com.mdmesh.kiosk.CrashLoopGuard
 import com.mdmesh.kiosk.KioskController
 import com.mdmesh.kiosk.brand.KioskBrand
 import com.mdmesh.kiosk.brand.KioskBrandTheme
+import com.mdmesh.policy.wifi.DpmHandle
 import com.mdmesh.proto.KioskApplyPayload
 import com.mdmesh.proto.KioskThemeDto
 import dagger.hilt.android.AndroidEntryPoint
@@ -61,6 +71,7 @@ class KioskLauncherActivity : ComponentActivity() {
     @Inject lateinit var controller: KioskController
     @Inject lateinit var events: EventSink
     @Inject lateinit var crashGuard: CrashLoopGuard
+    @Inject lateinit var dpmHandle: DpmHandle
 
     /** Last applied non-null kiosk state, so [onResume] can recover a bounced single-app pin. */
     private var active: KioskApplyPayload? = null
@@ -72,6 +83,11 @@ class KioskLauncherActivity : ComponentActivity() {
     private var assets = BrandAssets()
     private var assetsKey: Pair<String?, String?>? = null
     private var assetsJob: Job? = null
+
+    // MeinConnect fork: quick settings (Wi-Fi / brightness / volume) offered on the home screen.
+    private val wifiControl by lazy { WifiControl(this, dpmHandle.dpm, dpmHandle.admin) }
+    private val lightSound by lazy { LightAndSound(this, dpmHandle.dpm, dpmHandle.admin) }
+    private var sheet: QuickSheet? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -95,6 +111,9 @@ class KioskLauncherActivity : ComponentActivity() {
         // it (counting the bounce so a crash loop trips the guard). Enter/exit transitions are
         // handled by the flow collector, not here.
         val p = active ?: return
+        grantNotifications(p)
+        // Coming back to the home screen: refresh the quick-setting tiles (Wi-Fi name, levels).
+        if (screen == Screen.LAUNCHER && sheet?.isOpen != true) show(Screen.LAUNCHER)
         if (p.mode == "single") {
             crashGuard.registerFault()
             if (bailOnCrashLoop()) return
@@ -111,6 +130,7 @@ class KioskLauncherActivity : ComponentActivity() {
         }
         if (bailOnCrashLoop()) return
         startLockTaskSafely()
+        grantNotifications(p)
         if (p.mode == "single" && p.pinPackage != null) {
             launchPinned(p)
         } else {
@@ -212,10 +232,13 @@ class KioskLauncherActivity : ComponentActivity() {
     /** Draws [target] for the current payload; safe to call again (e.g. when remote images arrive). */
     private fun show(target: Screen) {
         screen = target
+        sheet?.close(notify = false)
+        sheet = null
         val p = active
         val theme = themeOf(p)
         ensureAssets(theme)
-        val screens = KioskScreens(this, theme, assets)
+        val parts = BrandParts(this, theme, assets)
+        val screens = KioskScreens(parts)
         val view = when (target) {
             Screen.IDLE -> screens.status(
                 getString(R.string.kiosk_idle_title),
@@ -227,7 +250,7 @@ class KioskLauncherActivity : ComponentActivity() {
                 getString(R.string.kiosk_recovery_body),
                 alert = true,
             )
-            Screen.LAUNCHER -> screens.launcher(launcherApps(p)) { pkg -> launchApp(pkg) }
+            Screen.LAUNCHER -> screens.launcher(homeModel(p), ::launchApp) { tab -> openQuick(parts, p, tab) }
         }
         if (p != null && target != Screen.RECOVERY) addExitAffordance(p, view, screens)
         setContentView(view)
@@ -262,6 +285,49 @@ class KioskLauncherActivity : ComponentActivity() {
             if (assetsKey == key && (logo != null || background != null)) {
                 assets = BrandAssets(logo, background)
                 show(screen)
+            }
+        }
+    }
+
+    /** Home content: the configuration's main app as the hero, the rest as rows, plus quick-setting state. */
+    private fun homeModel(p: KioskApplyPayload?): HomeModel {
+        val apps = launcherApps(p)
+        val main = apps.firstOrNull { it.pkg == p?.pinPackage } ?: apps.firstOrNull()
+        val quick = QuickTab.of(p?.quickSettings.orEmpty())
+        if (QuickTab.WIFI in quick) wifiControl.grantLocation()
+        return HomeModel(
+            main = main,
+            others = apps - listOfNotNull(main).toSet(),
+            quick = quick,
+            wifiName = if (QuickTab.WIFI in quick) wifiControl.currentSsid() else null,
+            brightness = if (QuickTab.BRIGHTNESS in quick) lightSound.brightnessPercent() else 0,
+            volume = if (QuickTab.VOLUME in quick) lightSound.volumePercent() else 0,
+        )
+    }
+
+    private fun openQuick(parts: BrandParts, p: KioskApplyPayload?, tab: QuickTab) {
+        val host = window.decorView.findViewById<ViewGroup>(android.R.id.content)?.getChildAt(0)
+            as? android.widget.FrameLayout ?: return
+        val tabs = QuickTab.of(p?.quickSettings.orEmpty())
+        sheet = QuickSheet(parts, wifiControl, lightSound, tabs, window) { show(Screen.LAUNCHER) }
+            .also { it.open(host, tab) }
+    }
+
+    /**
+     * MeinConnect fork: with kiosk notifications on, let the kiosk apps actually post them — Android 13+
+     * needs the runtime POST_NOTIFICATIONS grant, and nobody can answer the permission prompt in kiosk.
+     */
+    private fun grantNotifications(p: KioskApplyPayload) {
+        if (p.features.notifications != true || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val dpm = dpmHandle.dpm
+        for (pkg in (p.allowedPackages + listOfNotNull(p.pinPackage)).distinct()) {
+            runCatching {
+                dpm.setPermissionGrantState(
+                    dpmHandle.admin,
+                    pkg,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                    DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED,
+                )
             }
         }
     }

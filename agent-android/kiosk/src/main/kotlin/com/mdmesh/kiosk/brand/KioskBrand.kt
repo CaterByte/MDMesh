@@ -7,7 +7,7 @@ package com.mdmesh.kiosk.brand
  * packed ARGB ints, exactly what `android.graphics.Color` uses, so the app module can use them directly.
  */
 
-/** One hard-stop segment of the brand bar: [argb] fills from the previous segment's end up to [end] (0..1]. */
+/** One segment of the brand bar: [argb] owns the stretch from the previous segment's end up to [end] (0..1]. */
 data class BarStop(val argb: Int, val end: Float)
 
 /** Everything the launcher needs to draw itself; produced by [KioskBrand.resolve]. */
@@ -29,7 +29,7 @@ data class KioskBrandTheme(
 
 object KioskBrand {
 
-    // MeinConnect CI (design/ci/tokens): paper/soft/ink base, blue accent, signature bar with hard stops.
+    // MeinConnect CI (design/ci/tokens): paper/soft/ink base, blue accent, signature colours as a gradient.
     const val PAPER: Int = 0xFFFFFFFF.toInt()
     const val SOFT: Int = 0xFFF4F5F7.toInt()
     const val INK: Int = 0xFF111418.toInt()
@@ -44,7 +44,7 @@ object KioskBrand {
     private const val STOP_BERRY = 0.84f
     private const val PERCENT = 100f
 
-    /** The MeinConnect signature bar (topbar/footer of the portal): blue-led, hard stops. */
+    /** The MeinConnect signature colours (topbar/footer of the portal), blue-led; drawn via [brandGradient]. */
     val SIGNATURE_BAR: List<BarStop> = listOf(
         BarStop(BLUE, STOP_BLUE),
         BarStop(VIOLET, STOP_VIOLET),
@@ -124,7 +124,7 @@ object KioskBrand {
 
     /**
      * Brand bar spec: null/blank → [SIGNATURE_BAR]; `none` → no bar; otherwise comma-separated
-     * `#RRGGBB:END%` hard stops with strictly increasing ends (the last one is stretched to 100%).
+     * `#RRGGBB:END%` segments with strictly increasing ends (the last one is stretched to 100%).
      * `#RRGGBB` without ends on every segment gives equal widths. Anything malformed falls back to
      * the signature bar rather than drawing something half-parsed.
      */

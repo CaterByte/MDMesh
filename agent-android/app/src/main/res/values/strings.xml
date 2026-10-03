@@ -20,4 +20,29 @@
     <string name="kiosk_exit_wrong">Wrong password</string>
     <string name="agent_subtitle">Device agent</string>
     <string name="agent_managed_by">Managed with MeinConnect</string>
+
+    <!-- MeinConnect fork: home screen + quick settings -->
+    <string name="kiosk_location">Location</string>
+    <string name="kiosk_open">Open</string>
+    <string name="qs_wifi">Wi-Fi</string>
+    <string name="qs_brightness">Brightness</string>
+    <string name="qs_volume">Volume</string>
+    <string name="qs_wifi_hint">Tap a network and enter its password once</string>
+    <string name="qs_brightness_hint">Applies to this device</string>
+    <string name="qs_volume_hint">Media and notifications</string>
+    <string name="qs_connected">Connected</string>
+    <string name="qs_not_connected">Not connected</string>
+    <string name="qs_wifi_off">Wi-Fi is off</string>
+    <string name="qs_wifi_turn_on">Turn on</string>
+    <string name="qs_scanning">Searching for networks…</string>
+    <string name="qs_no_networks">No networks found. Is location turned on?</string>
+    <string name="qs_password">Password</string>
+    <string name="qs_connect">Connect</string>
+    <string name="qs_connecting">Connecting to %1$s…</string>
+    <string name="qs_enterprise">Enterprise Wi-Fi can\'t be set up here</string>
+    <string name="qs_dark">Dark</string>
+    <string name="qs_bright">Bright</string>
+    <string name="qs_quiet">Quiet</string>
+    <string name="qs_loud">Loud</string>
+    <string name="qs_percent">%1$d%%</string>
 </resources>

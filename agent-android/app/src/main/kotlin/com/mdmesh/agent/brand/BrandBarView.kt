@@ -2,26 +2,40 @@ package com.mdmesh.agent.brand
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Shader
 import android.view.View
 import com.mdmesh.kiosk.brand.BarStop
+import com.mdmesh.kiosk.brand.brandGradient
 
 /**
- * MeinConnect fork: the signature brand bar — solid segments with hard stops (no blending between
- * colours), drawn edge to edge. Mirrors the 4px bar under the portal's top bar.
+ * MeinConnect fork: the signature brand bar, drawn edge to edge as one smooth gradient through the
+ * configured colours (see [brandGradient]). Mirrors the bar under the portal's top bar.
  */
-class BrandBarView(context: Context, private val stops: List<BarStop>) : View(context) {
+class BrandBarView(context: Context, stops: List<BarStop>) : View(context) {
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val colors: IntArray
+    private val positions: FloatArray
+
+    init {
+        val (c, p) = brandGradient(stops)
+        colors = c
+        positions = p
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        paint.shader = if (colors.size >= 2) {
+            LinearGradient(0f, 0f, w.toFloat(), 0f, colors, positions, Shader.TileMode.CLAMP)
+        } else {
+            null
+        }
+    }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        var start = 0f
-        for (stop in stops) {
-            val end = width * stop.end
-            paint.color = stop.argb
-            canvas.drawRect(start, 0f, end, height.toFloat(), paint)
-            start = end
-        }
+        if (paint.shader != null) canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
     }
 }

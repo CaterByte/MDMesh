@@ -3,7 +3,7 @@
 Dies ist der MeinConnect-Fork von [MDMesh](https://github.com/MDMesh-app/MDMesh). Er bleibt so nah wie möglich am Original, damit Updates aus MDMesh leicht zu übernehmen sind, und ändert genau drei Dinge:
 
 1. **Eigene Agent-Identität.** Der Agent heißt `de.meinconnect.mdm` und wird mit dem eigenen Release-Schlüssel signiert. Die Konsole, der Einrichtungs-QR und der Updater sind darauf eingestellt.
-2. **Kiosk und Launcher im MeinConnect-CI.** Dazu gehören der Signaturbalken, das Logo, eine Uhr, App-Kacheln als Karten und Poppins als Schrift. Alle Texte gibt es auf Deutsch und Englisch, je nach Gerätesprache. Jede Konfiguration kann das Design überschreiben, etwa mit Titel, Logo, Farben, Hintergrundbild oder Balken. So geht auch White-Label pro Kunde.
+2. **Kiosk und Launcher im MeinConnect-CI.** Der Home-Screen ist fürs Smartphone im Hochformat gebaut: Signaturverlauf oben, Datum und große Uhr, Standort, die Haupt-App als große Karte mit Verlaufs-Knopf „Öffnen“, weitere Apps als Zeilen und unten die freigegebenen Schnelleinstellungen (WLAN, Helligkeit, Lautstärke). Schrift ist Poppins. Alle Texte gibt es auf Deutsch und Englisch, je nach Gerätesprache. Jede Konfiguration kann das Design überschreiben, etwa mit Titel, Logo, Farben, Hintergrundbild oder Balken. So geht auch White-Label pro Kunde.
 3. **Eigene Release-Pipeline.** Tags in diesem Repo bauen den signierten Agent, die Docker-Images unter `ghcr.io/caterbyte/…` und das per minisign signierte Manifest. Der Supervisor auf dem Server nimmt nur Releases an, die mit unserem Schlüssel signiert sind.
 
 ---
@@ -93,16 +93,20 @@ Das Branding stellst du in der Konsole ein: **Configurations → Konfiguration**
 | Kiosk title | Überschrift unter dem Logo, z. B. der Standortname | kein Titel |
 | Kiosk logo URL | Logo im Kopf und im Startbildschirm (https, PNG/JPEG/WebP, maximal 5 MB, wird auf dem Gerät zwischengespeichert) | MeinConnect-Wortmarke |
 | Kiosk accent color | Buttons, Fortschrittsanzeige, Tipp-Feedback | `#0957c3` |
-| Kiosk brand bar | Balken oben, als harte Stopps `#RRGGBB:ENDE%,…` oder `none` | `#0957c3:40,#593c90:64,#aa205d:84,#fa052a:100` |
+| Kiosk brand bar | Balken oben als durchgehender Verlauf durch die Farben `#RRGGBB:ENDE%,…`, oder `none` | MeinConnect-Verlauf `#0957c3:40,#593c90:64,#aa205d:84,#fa052a:100` |
 | Background color | Hintergrundfarbe der Seite. Ist sie dunkel, wird der Text automatisch hell und das Logo kommt auf einen weißen Chip. | `#f4f5f7` |
 | Text color | Textfarbe | `#111418` (auf dunklem Hintergrund weiß) |
 | Background image URL | Hintergrundbild, vollflächig zugeschnitten | keines |
-| Icon size | Größe der App-Icons in den Kacheln | Small |
+| Icon size | wird vom neuen Home-Screen nicht mehr genutzt (feste Größen) | – |
 
 **Die zwei typischen Konfigurationen:**
 
 - **Single-App:** *Kiosk mode* an und als *Main app* die MeinConnect- oder die Waage-App. Weitere Apps nicht zum Installieren eintragen. Das Gerät startet direkt in die App. Vom Agent sieht man nur kurz den Startbildschirm mit Logo und „Wird gestartet …“.
-- **Launcher:** *Kiosk mode* an und mehrere Apps installieren, zum Beispiel MeinConnect und die Waage. Das Gerät zeigt dann den MeinConnect-Home-Screen mit den App-Kacheln.
+- **Launcher:** *Kiosk mode* an und mehrere Apps installieren, zum Beispiel MeinConnect und die Waage. Das Gerät zeigt den MeinConnect-Home-Screen: Die *Main app* erscheint als große Karte, alle weiteren Apps als Zeilen darunter.
+
+**Schnelleinstellungen** (Gruppe Kiosk): *Quick setting: Wi-Fi*, *Quick setting: brightness* und *Quick setting: volume*. Was eingeschaltet ist, erscheint unten auf dem Home-Screen als Kachel und öffnet ein Fenster: WLAN wählen und Passwort eingeben, Helligkeit oder Lautstärke (Medien + Benachrichtigungen) per Regler. Die Android-Einstellungen selbst bleiben gesperrt. Für die WLAN-Liste muss die Standortfunktion des Geräts an sein. Firmen-WLAN (802.1X/EAP) lässt sich dort nicht einrichten.
+
+**Benachrichtigungen im Kiosk:** *Notifications* auf *On* stellen. Der Agent schaltet dann *Home* automatisch mit ein (Android verlangt das, sonst schlägt der ganze Kiosk fehl) und erteilt den freigegebenen Apps ab Android 13 die Benachrichtigungs-Berechtigung. Meldungen erscheinen dann als Banner, und die Benachrichtigungsleiste lässt sich herunterziehen. Androids Schnelleinstellungen bleiben dabei gesperrt.
 
 **Den Kiosk verlassen:**
 
@@ -120,8 +124,8 @@ In beiden Fällen wird das *Admin password* der Konfiguration abgefragt.
    - `agent-android/app/src/main/kotlin/com/mdmesh/agent/KioskLauncherActivity.kt`: Der View-Teil ist durch `brand/KioskScreens` ersetzt. Die Logik (`applyState`, Exit, Absturzschutz) entspricht dem Original.
    - `agent-android/app/src/main/kotlin/com/mdmesh/agent/MainActivity.kt`: Kopfbereich und Farben.
    - `server/src/main/resources/liquibase/db.changelog.xml`: Unser Changeset `mc-26.10.01-kiosk-branding` steht am Ende. Beim Mergen die Upstream-Changesets davor oder danach einfügen. Die IDs mit `mc-` kollidieren nie.
-   - `common/…/ConfigurationMapper.java` und `ConfigurationMapper.xml`: die vier `kiosk*`-Spalten.
-   - `web/src/data/configFields.ts`: die Branding-Felder und `KIOSK_AFFECTING_KEYS`.
+   - `common/…/ConfigurationMapper.java` und `ConfigurationMapper.xml`: die `kiosk*`-Spalten (Branding + Schnelleinstellungen).
+   - `web/src/data/configFields.ts`: die Branding- und Schnelleinstellungs-Felder und `KIOSK_AFFECTING_KEYS`.
    - `.github/workflows/release.yml`, `setup.sh`, `install/install-native.sh`, `quickstart.sh`, `docker-compose.release.yml`: Paketname und Repo-Besitzer.
    - `release/minisign.pub`: **Hier immer unseren Schlüssel behalten.**
 3. Warten, bis die CI auf `main` grün ist (`t0-fast`). Dann den nächsten Tag setzen, siehe oben. Der Supervisor bietet das Update dann in der Konsole an.
@@ -135,9 +139,10 @@ In beiden Fällen wird das *Admin password* der Konfiguration abgefragt.
 | Agent-Identität | `agent-android/app/build.gradle.kts` (`applicationId`), `web/src/enroll/provisioning.ts`, `web/src/components/RolloutPanel.tsx` |
 | Pipeline und Installer | `.github/workflows/release.yml`, `setup.sh`, `install/install-native.sh`, `quickstart.sh`, `docker-compose.release.yml`, `release/minisign.pub` |
 | Theme-Vertrag | `proto/payloads/config-apply.schema.json`, `agent-android/proto/…/KioskCommand.kt`, `common/…/DesiredKioskTheme.java`, `common/…/DesiredConfigBuilder.java` (+ Test) |
-| Datenbank | `Configuration.java`, `ConfigurationMapper.java/.xml`, Liquibase-Changeset `mc-26.10.01-kiosk-branding` |
+| Datenbank | `Configuration.java`, `ConfigurationMapper.java/.xml`, Liquibase-Changesets `mc-26.10.01-kiosk-branding` und `mc-26.10.04-kiosk-quick-settings` |
 | Konsole | `web/src/data/configFields.ts`, `web/src/pages/ConfigurationsPage.tsx` (Reset für Farbfelder) |
-| Agent-Oberfläche | `agent-android/kiosk/…/brand/KioskBrand.kt` (+ Test), `agent-android/app/…/brand/*`, `KioskLauncherActivity.kt`, `MainActivity.kt`, `core/…/AlertNotifier.kt` |
+| Agent-Oberfläche | `agent-android/kiosk/…/brand/KioskBrand.kt`, `BrandGradient.kt` (+ Test), `agent-android/app/…/brand/*` (HomeScreen, QuickSheet, QuickSlider, WifiControl, LightAndSound, BrandParts …), `KioskLauncherActivity.kt`, `MainActivity.kt`, `core/…/AlertNotifier.kt`, `AndroidManifest.xml` (CHANGE_WIFI_STATE) |
+| Kiosk-Verhalten | `agent-android/kiosk/…/KioskFeatures.kt` (+ Test): Notifications/Recents ziehen Home mit; Liquibase `mc-26.10.04-kiosk-quick-settings`; `DesiredKiosk.quickSettings` |
 | Ressourcen | `res/font/poppins_*.ttf` (OFL, siehe `agent-android/third_party/poppins/OFL.txt`), `res/drawable-nodpi/mc_*.png`, `res/mipmap-*/ic_launcher_foreground.png`, `res/values(-de)/strings.xml`, `core/src/main/res/values(-de)/strings.xml` |
 
 ## Noch offen

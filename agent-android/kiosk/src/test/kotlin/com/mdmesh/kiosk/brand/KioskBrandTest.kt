@@ -96,6 +96,16 @@ class KioskBrandTest {
     }
 
     @Test
+    fun `signature bar becomes a smooth gradient with colours at segment centres`() {
+        val (colors, positions) = brandGradient(KioskBrand.SIGNATURE_BAR)
+        val b = KioskBrand
+        assertEquals(listOf(b.BLUE, b.BLUE, b.VIOLET, b.BERRY, b.RED, b.RED), colors.toList())
+        val expected = listOf(0f, 0.2f, 0.52f, 0.74f, 0.92f, 1f)
+        expected.zip(positions.toList()).forEach { (e, a) -> assertEquals(e, a, 1e-4f) }
+        assertTrue(brandGradient(emptyList()).first.isEmpty())
+    }
+
+    @Test
     fun `blend and luminance behave at the extremes`() {
         assertEquals(KioskBrand.INK, KioskBrand.blend(KioskBrand.INK, KioskBrand.PAPER, 0f))
         assertEquals(KioskBrand.PAPER, KioskBrand.blend(KioskBrand.INK, KioskBrand.PAPER, 1f))

@@ -18,4 +18,28 @@
     <string name="kiosk_exit_wrong">Falsches Passwort</string>
     <string name="agent_subtitle">Geräte-Agent</string>
     <string name="agent_managed_by">Verwaltet mit MeinConnect</string>
+
+    <string name="kiosk_location">Standort</string>
+    <string name="kiosk_open">Öffnen</string>
+    <string name="qs_wifi">WLAN</string>
+    <string name="qs_brightness">Helligkeit</string>
+    <string name="qs_volume">Lautstärke</string>
+    <string name="qs_wifi_hint">Netzwerk antippen, Passwort einmal eingeben</string>
+    <string name="qs_brightness_hint">Gilt für dieses Gerät</string>
+    <string name="qs_volume_hint">Medien und Benachrichtigungen</string>
+    <string name="qs_connected">Verbunden</string>
+    <string name="qs_not_connected">Nicht verbunden</string>
+    <string name="qs_wifi_off">WLAN ist aus</string>
+    <string name="qs_wifi_turn_on">Einschalten</string>
+    <string name="qs_scanning">Suche Netzwerke …</string>
+    <string name="qs_no_networks">Keine Netzwerke gefunden. Ist der Standort eingeschaltet?</string>
+    <string name="qs_password">Passwort</string>
+    <string name="qs_connect">Verbinden</string>
+    <string name="qs_connecting">Verbinde mit %1$s …</string>
+    <string name="qs_enterprise">Firmen-WLAN lässt sich hier nicht einrichten</string>
+    <string name="qs_dark">Dunkel</string>
+    <string name="qs_bright">Hell</string>
+    <string name="qs_quiet">Leise</string>
+    <string name="qs_loud">Laut</string>
+    <string name="qs_percent">%1$d %%</string>
 </resources>
