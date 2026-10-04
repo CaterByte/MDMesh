@@ -23,12 +23,14 @@ package com.hmdm.rest.resource;
 
 import com.hmdm.persistence.AgentCommandDAO;
 import com.hmdm.persistence.AgentEnrollmentTokenDAO;
+import com.hmdm.persistence.McDeviceBrandingDAO;
 import com.hmdm.persistence.UnsecureDAO;
 import com.hmdm.persistence.domain.AgentCommand;
 import com.hmdm.persistence.domain.AgentEnrollmentToken;
 import com.hmdm.persistence.domain.Device;
 import com.hmdm.persistence.domain.DeviceState;
 import com.hmdm.persistence.domain.DeviceSyncRow;
+import com.hmdm.persistence.domain.McDeviceBranding;
 import com.hmdm.notification.AgentWakeHub;
 import com.hmdm.rest.json.AgentBulkCommandRequest;
 import com.hmdm.rest.json.Response;
@@ -49,6 +51,7 @@ import javax.inject.Singleton;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
+import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
@@ -84,6 +87,12 @@ public class AgentAdminResource {
     private AgentWakeHub wakeHub;
     private com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller;
     private ConfigReconciler configReconciler;
+    private McDeviceBrandingDAO brandingDAO;
+
+    /** MeinConnect fork: limits of the per-device branding override (match the configuration columns). */
+    private static final int MAX_BRAND_TITLE = 100;
+    private static final int MAX_BRAND_LOGO_URL = 500;
+    private static final int MAX_TOKEN_DESCRIPTION = 200;
 
     /**
      * <p>A constructor required by Swagger.</p>
@@ -97,7 +106,9 @@ public class AgentAdminResource {
                               UnsecureDAO unsecureDAO,
                               AgentWakeHub wakeHub,
                               com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller,
-                              ConfigReconciler configReconciler) {
+                              ConfigReconciler configReconciler,
+                              McDeviceBrandingDAO brandingDAO) {
+        this.brandingDAO = brandingDAO;
         this.tokenDAO = tokenDAO;
         this.commandDAO = commandDAO;
         this.unsecureDAO = unsecureDAO;
@@ -152,6 +163,17 @@ public class AgentAdminResource {
         token.setToken(UUID.randomUUID().toString());
         token.setCustomerId(customerId.get());
         token.setConfigurationId(configurationId);
+        // MeinConnect fork: optional name for the enrolled device (applied at enrollment).
+        String description = body == null ? null : body.getMcDescription();
+        if (description != null) {
+            description = description.trim();
+            if (description.isEmpty()) {
+                description = null;
+            } else if (description.length() > MAX_TOKEN_DESCRIPTION) {
+                description = description.substring(0, MAX_TOKEN_DESCRIPTION);
+            }
+        }
+        token.setMcDescription(description);
         token.setUsed(false);
         token.setCreatedAt(now);
         token.setExpiresAt(now + DEFAULT_TOKEN_TTL_MILLIS);
@@ -346,15 +368,20 @@ public class AgentAdminResource {
     public Response getSyncSummary() {
         Optional<Integer> customerId = SecurityContext.get().getCurrentCustomerId();
         if (!customerId.isPresent()) return Response.PERMISSION_DENIED();
-        Map<Integer, String> revisionByConfig = new HashMap<>();
+        Map<String, String> revisionByKey = new HashMap<>();
         Map<Integer, ConfigSyncSummary> out = new LinkedHashMap<>();
+        // MeinConnect fork: devices with their own branding have their own revision.
+        Map<Integer, McDeviceBranding> brandings = brandingDAO.byCustomer(customerId.get());
         for (DeviceSyncRow row : commandDAO.listDevicesForSync(customerId.get())) {
             Integer cfgId = row.getConfigurationId();
             ConfigSyncSummary s = out.computeIfAbsent(cfgId, id -> { ConfigSyncSummary x = new ConfigSyncSummary(); x.setConfigurationId(id); return x; });
             s.setTotal(s.getTotal() + 1);
-            String current = revisionByConfig.computeIfAbsent(cfgId, id -> {
-                Device probe = new Device(); probe.setConfigurationId(id); probe.setCustomerId(customerId.get());
-                return configReconciler.currentRevision(probe);
+            McDeviceBranding branding = row.getDeviceId() == null ? null : brandings.get(row.getDeviceId());
+            String key = cfgId + "|" + (branding == null ? "" : branding.cacheKey());
+            String current = revisionByKey.computeIfAbsent(key, k -> {
+                Device probe = new Device(); probe.setConfigurationId(cfgId); probe.setCustomerId(customerId.get());
+                com.hmdm.rest.json.agent.DesiredConfig doc = configReconciler.documentFor(probe, branding);
+                return doc == null ? null : doc.getRevision();
             });
             Set<String> tokens = AgentCapabilityTokens.flatten(row.getCapabilitiesJson());
             boolean supported = AgentCapabilityTokens.isAllowed(DesiredConfigBuilder.CAPABILITY, tokens);
@@ -489,5 +516,74 @@ public class AgentAdminResource {
         }
         wakeHub.wake(deviceId, "commands");
         return Response.OK();
+    }
+
+    // =================================================================================================================
+    // MeinConnect fork: per-device kiosk branding + enrollment-token status
+    // =================================================================================================================
+
+    @ApiOperation(value = "Device kiosk branding", notes = "MeinConnect fork: the device's title/logo override (null = configuration branding).")
+    @GET
+    @Path("/devices/{deviceId}/branding")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response getBranding(@PathParam("deviceId") String deviceId) {
+        Device device = ownDevice(deviceId);
+        if (device == null) return Response.ERROR("error.agent.device.unknown");
+        return Response.OK(brandingDAO.find(device.getId()));
+    }
+
+    @ApiOperation(value = "Set device kiosk branding", notes = "MeinConnect fork: overlays title and/or logo URL "
+            + "(https only) on the configuration's kiosk theme for this device; both blank removes the override. "
+            + "The device is woken and picks up the new desired state on its next check-in.")
+    @PUT
+    @Path("/devices/{deviceId}/branding")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response setBranding(@PathParam("deviceId") String deviceId, McDeviceBranding body) {
+        if (!canEditDevices("set device branding")) {
+            return Response.PERMISSION_DENIED();
+        }
+        Device device = ownDevice(deviceId);
+        if (device == null) return Response.ERROR("error.agent.device.unknown");
+
+        String title = body == null || body.getTitle() == null ? null : body.getTitle().trim();
+        String logoUrl = body == null || body.getLogoUrl() == null ? null : body.getLogoUrl().trim();
+        if (title != null && title.length() > MAX_BRAND_TITLE) {
+            return Response.ERROR("error.agent.branding.invalid");
+        }
+        if (logoUrl != null && !logoUrl.isEmpty()
+                && (logoUrl.length() > MAX_BRAND_LOGO_URL || !logoUrl.toLowerCase(java.util.Locale.ROOT).startsWith("https://"))) {
+            // The agent only loads https images; reject early instead of silently showing nothing.
+            return Response.ERROR("error.agent.branding.invalid");
+        }
+
+        brandingDAO.save(device.getId(), title, logoUrl);
+        wakeHub.wake(deviceId, "commands");
+        logger.info("Kiosk branding of device {} set (title {}, logo {})", deviceId,
+                title == null || title.isEmpty() ? "-" : "set", logoUrl == null || logoUrl.isEmpty() ? "-" : "set");
+        return Response.OK(brandingDAO.find(device.getId()));
+    }
+
+    @ApiOperation(value = "Enrollment token status", notes = "MeinConnect fork: whether the token was used and by which device.")
+    @GET
+    @Path("/token/{id}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response getToken(@PathParam("id") Integer id) {
+        Optional<Integer> customerId = SecurityContext.get().getCurrentCustomerId();
+        if (!customerId.isPresent()) return Response.PERMISSION_DENIED();
+        AgentEnrollmentToken token = tokenDAO.findById(id);
+        if (token == null || token.getCustomerId() != customerId.get()) {
+            return Response.ERROR("error.agent.token.invalid");
+        }
+        return Response.OK(token);
+    }
+
+    /** The device when it exists and belongs to the current customer, else null. */
+    private Device ownDevice(String deviceId) {
+        Optional<Integer> customerId = SecurityContext.get().getCurrentCustomerId();
+        if (!customerId.isPresent()) return null;
+        Device device = unsecureDAO.getDeviceByNumber(deviceId);
+        if (device == null || device.getCustomerId() != customerId.get()) return null;
+        return device;
     }
 }

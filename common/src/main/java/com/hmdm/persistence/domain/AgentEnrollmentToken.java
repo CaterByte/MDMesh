@@ -42,6 +42,12 @@ public class AgentEnrollmentToken implements Serializable {
     private Long expiresAt;
     /** Configuration the enrolled device is bound to; NULL = the customer's settings default. */
     private Integer configurationId;
+    /** MeinConnect fork: description the enrolled device gets (its name in the console). NULL = none. */
+    private String mcDescription;
+    /** MeinConnect fork: number of the device that consumed this token (set at enrollment). */
+    private String mcDeviceNumber;
+    /** MeinConnect fork: when the token was consumed by a successful enrollment (epoch millis). */
+    private Long mcEnrolledAt;
 
     public AgentEnrollmentToken() {
     }
@@ -100,5 +106,29 @@ public class AgentEnrollmentToken implements Serializable {
 
     public void setExpiresAt(Long expiresAt) {
         this.expiresAt = expiresAt;
+    }
+
+    public String getMcDescription() {
+        return mcDescription;
+    }
+
+    public void setMcDescription(String mcDescription) {
+        this.mcDescription = mcDescription;
+    }
+
+    public String getMcDeviceNumber() {
+        return mcDeviceNumber;
+    }
+
+    public void setMcDeviceNumber(String mcDeviceNumber) {
+        this.mcDeviceNumber = mcDeviceNumber;
+    }
+
+    public Long getMcEnrolledAt() {
+        return mcEnrolledAt;
+    }
+
+    public void setMcEnrolledAt(Long mcEnrolledAt) {
+        this.mcEnrolledAt = mcEnrolledAt;
     }
 }

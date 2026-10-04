@@ -108,6 +108,8 @@ Das Branding stellst du in der Konsole ein: **Configurations → Konfiguration**
 
 **Benachrichtigungen im Kiosk:** *Notifications* auf *On* stellen. Der Agent schaltet dann *Home* automatisch mit ein (Android verlangt das, sonst schlägt der ganze Kiosk fehl) und erteilt den freigegebenen Apps ab Android 13 die Benachrichtigungs-Berechtigung. Meldungen erscheinen dann als Banner, und die Benachrichtigungsleiste lässt sich herunterziehen. Androids Schnelleinstellungen bleiben dabei gesperrt.
 
+**Branding pro Gerät (MeinConnect):** Ab v1.2 kann jedes Gerät Titel und Logo der Konfiguration überschreiben (Tabelle `mcDeviceBranding`). MeinConnect setzt das automatisch aus dem White-Label des zugeordneten Kunden, so teilen sich viele Kunden eine Konfiguration wie „Waage Kiosk“. Ein überschriebenes Gerät hat dadurch eine eigene Revision; die Sync-Übersicht der Konsole rechnet das mit ein. API: `GET`/`PUT /rest/private/agent/v1/devices/{nummer}/branding` mit `{"title": …, "logoUrl": "https://…"}`, beide leer = zurück zur Konfiguration.
+
 **Den Kiosk verlassen:**
 
 - *Kiosk exit button* an: Es erscheint der Knopf „Kiosk verlassen“.
@@ -125,6 +127,7 @@ In beiden Fällen wird das *Admin password* der Konfiguration abgefragt.
    - `agent-android/app/src/main/kotlin/com/mdmesh/agent/MainActivity.kt`: Kopfbereich und Farben.
    - `server/src/main/resources/liquibase/db.changelog.xml`: Unser Changeset `mc-26.10.01-kiosk-branding` steht am Ende. Beim Mergen die Upstream-Changesets davor oder danach einfügen. Die IDs mit `mc-` kollidieren nie.
    - `common/…/ConfigurationMapper.java` und `ConfigurationMapper.xml`: die `kiosk*`-Spalten (Branding + Schnelleinstellungen).
+   - `AgentAdminResource.java`, `AgentResource.java` (enroll), `ConfigReconciler.java`, `AgentEnrollmentToken(Mapper).java`, `AgentDeviceMapper.java` (`listDevicesForSync` mit `deviceId`), `DeviceSyncRow.java`, `UnsecureDAO.java`: Geräte-Branding und Token-Metadaten (alles mit „MeinConnect fork“ kommentiert).
    - `web/src/data/configFields.ts`: die Branding- und Schnelleinstellungs-Felder und `KIOSK_AFFECTING_KEYS`.
    - `.github/workflows/release.yml`, `setup.sh`, `install/install-native.sh`, `quickstart.sh`, `docker-compose.release.yml`: Paketname und Repo-Besitzer.
    - `release/minisign.pub`: **Hier immer unseren Schlüssel behalten.**
@@ -139,7 +142,8 @@ In beiden Fällen wird das *Admin password* der Konfiguration abgefragt.
 | Agent-Identität | `agent-android/app/build.gradle.kts` (`applicationId`), `web/src/enroll/provisioning.ts`, `web/src/components/RolloutPanel.tsx` |
 | Pipeline und Installer | `.github/workflows/release.yml`, `setup.sh`, `install/install-native.sh`, `quickstart.sh`, `docker-compose.release.yml`, `release/minisign.pub` |
 | Theme-Vertrag | `proto/payloads/config-apply.schema.json`, `agent-android/proto/…/KioskCommand.kt`, `common/…/DesiredKioskTheme.java`, `common/…/DesiredConfigBuilder.java` (+ Test) |
-| Datenbank | `Configuration.java`, `ConfigurationMapper.java/.xml`, Liquibase-Changesets `mc-26.10.01-kiosk-branding` und `mc-26.10.04-kiosk-quick-settings` |
+| Datenbank | `Configuration.java`, `ConfigurationMapper.java/.xml`, Liquibase-Changesets `mc-26.10.01-kiosk-branding`, `mc-26.10.04-kiosk-quick-settings` und `mc-26.10.05-device-branding-enroll-meta` |
+| MeinConnect-Anbindung (v1.2) | `McDeviceBranding*.java` (Domain, Mapper, DAO), `DesiredConfigBuilder.build(cfg, apps, branding)` (+ Test), `ConfigReconciler`, `AgentAdminResource` (`/devices/{n}/branding`, `/token/{id}`, `mcDescription` beim Token), `AgentResource.enroll` (Gerätename aus dem Token, `mcDeviceNumber`) |
 | Konsole | `web/src/data/configFields.ts`, `web/src/pages/ConfigurationsPage.tsx` (Reset für Farbfelder) |
 | Agent-Oberfläche | `agent-android/kiosk/…/brand/KioskBrand.kt`, `BrandGradient.kt` (+ Test), `agent-android/app/…/brand/*` (HomeScreen, QuickSheet, QuickSlider, WifiControl, LightAndSound, BrandParts …), `KioskLauncherActivity.kt`, `MainActivity.kt`, `core/…/AlertNotifier.kt`, `AndroidManifest.xml` (CHANGE_WIFI_STATE) |
 | Kiosk-Verhalten | `agent-android/kiosk/…/KioskFeatures.kt` (+ Test): Notifications/Recents ziehen Home mit; Liquibase `mc-26.10.04-kiosk-quick-settings`; `DesiredKiosk.quickSettings` |
@@ -149,4 +153,4 @@ In beiden Fällen wird das *Admin password* der Konfiguration abgefragt.
 
 - Den Kiosk auf einem echten Gerät ansehen. Die Oberfläche ist programmatisch gebaut und lokal nur gegen die Android-Schnittstellen typgeprüft. Den vollständigen Build und Lint übernimmt die CI.
 - Das App-Icon ist eine Ableitung aus der Wortmarke mit dem Signaturbalken. Eine eigene Bildmarke fehlt noch.
-- Phase 2: MeinConnect über die MDMesh-Admin-API anbinden, also Tablets Kunden und Standorten zuordnen und Befehle aus dem Portal auslösen.
+- MeinConnect-Anbindung: umgesetzt im MeinConnect-Repo (`Modules/Mdm`, `docs/konzept-mdm-anbindung.md`). Ab v1.2 mit Geräte-Branding und Vorab-Zuordnung beim Einrichten.

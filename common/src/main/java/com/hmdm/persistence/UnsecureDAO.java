@@ -166,6 +166,11 @@ public class UnsecureDAO {
         return this.deviceMapper.getDeviceByNumber(number);
     }
 
+    /** MeinConnect fork: name a freshly enrolled device from its enrollment token (no user context). */
+    public void mcSetDeviceDescription(Integer deviceId, String description) {
+        this.deviceMapper.updateDeviceDescription(deviceId, description);
+    }
+
     public Device getDeviceByOldNumber(String number) {
         return this.deviceMapper.getDeviceByOldNumber(number);
     }

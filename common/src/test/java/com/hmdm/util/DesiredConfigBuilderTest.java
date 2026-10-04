@@ -3,6 +3,7 @@ package com.hmdm.util;
 import com.hmdm.persistence.domain.Application;
 import com.hmdm.persistence.domain.Configuration;
 import com.hmdm.persistence.domain.IconSize;
+import com.hmdm.persistence.domain.McDeviceBranding;
 import com.hmdm.persistence.domain.RequestUpdatesType;
 import com.hmdm.rest.json.agent.DesiredConfig;
 import org.junit.Test;
@@ -144,5 +145,46 @@ public class DesiredConfigBuilderTest {
         DesiredConfig d = DesiredConfigBuilder.build(kioskConfig(), Arrays.asList(app(5, 505, "com.acme.pos", 1)));
         assertEquals(resource("desired-config-kiosk.json"), DesiredConfigBuilder.canonicalJson(d));
         assertEquals(resource("desired-config-kiosk.sha256"), d.getRevision());
+    }
+
+    // --- MeinConnect fork: per-device branding overlay ------------------------------------------------
+
+    @Test
+    public void device_branding_overrides_title_and_logo_and_changes_the_revision() {
+        Configuration c = kioskConfig();
+        c.setKioskTitle("Konfiguration");
+        c.setKioskLogoUrl("https://cfg.example/logo.png");
+        DesiredConfig base = DesiredConfigBuilder.build(c, Arrays.asList(app(5, 505, "com.acme.pos", 1)));
+        DesiredConfig branded = DesiredConfigBuilder.build(c, Arrays.asList(app(5, 505, "com.acme.pos", 1)),
+                new McDeviceBranding(7, "Kantine Nord", "https://brand.example/logo.png", 1L));
+
+        assertEquals("Kantine Nord", branded.getKiosk().getTheme().getTitle());
+        assertEquals("https://brand.example/logo.png", branded.getKiosk().getTheme().getLogoUrl());
+        assertNotEquals(base.getRevision(), branded.getRevision());
+    }
+
+    @Test
+    public void partial_or_blank_branding_keeps_the_configuration_values() {
+        Configuration c = kioskConfig();
+        c.setKioskTitle("Konfiguration");
+        c.setKioskLogoUrl("https://cfg.example/logo.png");
+        DesiredConfig titleOnly = DesiredConfigBuilder.build(c, Collections.<Application>emptyList(),
+                new McDeviceBranding(7, "Kantine Nord", "  ", 1L));
+        assertEquals("Kantine Nord", titleOnly.getKiosk().getTheme().getTitle());
+        assertEquals("https://cfg.example/logo.png", titleOnly.getKiosk().getTheme().getLogoUrl());
+
+        DesiredConfig blank = DesiredConfigBuilder.build(c, Collections.<Application>emptyList(),
+                new McDeviceBranding(7, null, null, 1L));
+        assertEquals(DesiredConfigBuilder.build(c, Collections.<Application>emptyList()).getRevision(), blank.getRevision());
+    }
+
+    @Test
+    public void branding_is_ignored_without_kiosk() {
+        Configuration c = kioskConfig();
+        c.setKioskMode(false);
+        DesiredConfig d = DesiredConfigBuilder.build(c, Collections.<Application>emptyList(),
+                new McDeviceBranding(7, "Kantine Nord", null, 1L));
+        assertNull(d.getKiosk());
+        assertEquals(DesiredConfigBuilder.build(c, Collections.<Application>emptyList()).getRevision(), d.getRevision());
     }
 }

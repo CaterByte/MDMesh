@@ -10,6 +10,8 @@ import lombok.Setter;
 @Getter
 @Setter
 public class DeviceSyncRow {
+    /** MeinConnect fork: device row id (to look up its branding override). */
+    private Integer deviceId;
     private String deviceNumber;
     private Integer configurationId;
     private String capabilitiesJson;

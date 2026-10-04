@@ -3,6 +3,7 @@ package com.hmdm.util;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdm.persistence.domain.Application;
 import com.hmdm.persistence.domain.Configuration;
+import com.hmdm.persistence.domain.McDeviceBranding;
 import com.hmdm.persistence.domain.RequestUpdatesType;
 import com.hmdm.rest.json.agent.DesiredConfig;
 import com.hmdm.rest.json.agent.DesiredKiosk;
@@ -43,10 +44,19 @@ public final class DesiredConfigBuilder {
     private DesiredConfigBuilder() {}
 
     public static DesiredConfig build(Configuration cfg, List<Application> apps) {
+        return build(cfg, apps, null);
+    }
+
+    /**
+     * MeinConnect fork: same as {@link #build(Configuration, List)} with a per-device branding overlay
+     * (title/logo) on the kiosk theme. A null or empty overlay yields exactly the configuration's
+     * document and revision, so devices without an override keep sharing one revision.
+     */
+    public static DesiredConfig build(Configuration cfg, List<Application> apps, McDeviceBranding branding) {
         DesiredConfig d = new DesiredConfig();
         d.setConfigurationId(cfg.getId());
         d.setPolicies(policies(cfg));
-        d.setKiosk(cfg.isKioskMode() ? kiosk(cfg, apps == null ? Collections.<Application>emptyList() : apps) : null);
+        d.setKiosk(cfg.isKioskMode() ? kiosk(cfg, apps == null ? Collections.<Application>emptyList() : apps, branding) : null);
         DesiredLocation loc = new DesiredLocation();
         loc.setMode(cfg.getRequestUpdates() == RequestUpdatesType.GPS ? "active" : "passive");
         d.setLocation(loc);
@@ -71,7 +81,7 @@ public final class DesiredConfigBuilder {
      * Builds the kiosk block. The main (pinned) app is matched by application VERSION id:
      * {@code cfg.mainAppId == app.usedVersionId}, never by {@code app.id}.
      */
-    private static DesiredKiosk kiosk(Configuration cfg, List<Application> apps) {
+    private static DesiredKiosk kiosk(Configuration cfg, List<Application> apps, McDeviceBranding branding) {
         String mainPkg = null;
         for (Application a : apps) {
             if (a == null || a.getPkg() == null || a.getPkg().trim().isEmpty() || a.getAction() != ACTION_INSTALL) continue;
@@ -110,6 +120,13 @@ public final class DesiredConfigBuilder {
         t.setAccentColor(blankToNull(cfg.getKioskAccentColor()));
         t.setBackgroundImageUrl(blankToNull(cfg.getBackgroundImageUrl()));
         t.setBrandBar(blankToNull(cfg.getKioskBrandBar()));
+        if (branding != null) {
+            // MeinConnect fork: the device's customer brand wins over the configuration's.
+            String title = blankToNull(branding.getTitle());
+            String logo = blankToNull(branding.getLogoUrl());
+            if (title != null) t.setTitle(title);
+            if (logo != null) t.setLogoUrl(logo);
+        }
         k.setTheme(t);
         k.setQuickSettings(quickSettings(cfg));
         return k;

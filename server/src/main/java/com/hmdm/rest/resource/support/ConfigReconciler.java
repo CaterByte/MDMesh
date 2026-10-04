@@ -1,11 +1,13 @@
 package com.hmdm.rest.resource.support;
 
 import com.hmdm.persistence.AgentCommandDAO;
+import com.hmdm.persistence.McDeviceBrandingDAO;
 import com.hmdm.persistence.UnsecureDAO;
 import com.hmdm.persistence.domain.AgentCommand;
 import com.hmdm.persistence.domain.Application;
 import com.hmdm.persistence.domain.Configuration;
 import com.hmdm.persistence.domain.Device;
+import com.hmdm.persistence.domain.McDeviceBranding;
 import com.hmdm.rest.json.agent.DesiredConfig;
 import com.hmdm.util.AgentCapabilityTokens;
 import com.hmdm.util.ConfigReconcileDecision;
@@ -31,11 +33,13 @@ public class ConfigReconciler {
 
     private final UnsecureDAO unsecureDAO;
     private final AgentCommandDAO commandDAO;
+    private final McDeviceBrandingDAO brandingDAO;
 
     @Inject
-    public ConfigReconciler(UnsecureDAO unsecureDAO, AgentCommandDAO commandDAO) {
+    public ConfigReconciler(UnsecureDAO unsecureDAO, AgentCommandDAO commandDAO, McDeviceBrandingDAO brandingDAO) {
         this.unsecureDAO = unsecureDAO;
         this.commandDAO = commandDAO;
+        this.brandingDAO = brandingDAO;
     }
 
     /** The desired-state document for the device's configuration, or null when it has none. */
@@ -44,7 +48,18 @@ public class ConfigReconciler {
         Configuration cfg = unsecureDAO.getConfigurationById(device.getConfigurationId());
         if (cfg == null) return null;
         List<Application> apps = unsecureDAO.getPlainConfigurationAppsOptimized(cfg.getId());
-        return DesiredConfigBuilder.build(cfg, apps);
+        // MeinConnect fork: the device's own branding (one PK select) overlays the configuration theme.
+        McDeviceBranding branding = cfg.isKioskMode() ? brandingDAO.find(device.getId()) : null;
+        return DesiredConfigBuilder.build(cfg, apps, branding);
+    }
+
+    /** MeinConnect fork: document for a configuration with a known branding (sync summary, no extra select). */
+    public DesiredConfig documentFor(Device device, McDeviceBranding branding) {
+        if (device == null || device.getConfigurationId() == null) return null;
+        Configuration cfg = unsecureDAO.getConfigurationById(device.getConfigurationId());
+        if (cfg == null) return null;
+        List<Application> apps = unsecureDAO.getPlainConfigurationAppsOptimized(cfg.getId());
+        return DesiredConfigBuilder.build(cfg, apps, branding);
     }
 
     public String currentRevision(Device device) {

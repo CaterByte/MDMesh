@@ -2883,4 +2883,27 @@
         </rollback>
     </changeSet>
 
+    <changeSet id="mc-26.10.05-device-branding-enroll-meta" author="meinconnect" context="common">
+        <comment>Per-device kiosk branding (title/logo overlaying the configuration theme, set by MeinConnect
+            per customer) and enrollment-token metadata: a description for the new device and which device
+            consumed the token, so MeinConnect can pre-assign devices enrolled from its QR codes.</comment>
+        <sql>
+            CREATE TABLE mcDeviceBranding (
+                deviceId INTEGER PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+                title VARCHAR(100),
+                logoUrl VARCHAR(500),
+                updatedAt BIGINT
+            );
+            ALTER TABLE agentEnrollmentToken ADD COLUMN mcDescription VARCHAR(200);
+            ALTER TABLE agentEnrollmentToken ADD COLUMN mcDeviceNumber VARCHAR(100);
+            ALTER TABLE agentEnrollmentToken ADD COLUMN mcEnrolledAt BIGINT;
+        </sql>
+        <rollback>
+            ALTER TABLE agentEnrollmentToken DROP COLUMN mcEnrolledAt;
+            ALTER TABLE agentEnrollmentToken DROP COLUMN mcDeviceNumber;
+            ALTER TABLE agentEnrollmentToken DROP COLUMN mcDescription;
+            DROP TABLE mcDeviceBranding;
+        </rollback>
+    </changeSet>
+
 </databaseChangeLog>

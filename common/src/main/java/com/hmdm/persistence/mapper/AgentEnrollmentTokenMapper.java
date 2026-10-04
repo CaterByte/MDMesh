@@ -33,14 +33,22 @@ import org.apache.ibatis.annotations.Update;
  */
 public interface AgentEnrollmentTokenMapper {
 
-    @Insert({"INSERT INTO agentEnrollmentToken (token, customerId, used, createdAt, expiresAt, configurationId) " +
-            "VALUES (#{token}, #{customerId}, #{used}, #{createdAt}, #{expiresAt}, #{configurationId})"})
+    @Insert({"INSERT INTO agentEnrollmentToken (token, customerId, used, createdAt, expiresAt, configurationId, mcDescription) " +
+            "VALUES (#{token}, #{customerId}, #{used}, #{createdAt}, #{expiresAt}, #{configurationId}, #{mcDescription})"})
     @SelectKey(statement = "SELECT currval('agentenrollmenttoken_id_seq')", keyColumn = "id", keyProperty = "id",
             before = false, resultType = int.class)
     void insert(AgentEnrollmentToken token);
 
     @Select({"SELECT * FROM agentEnrollmentToken WHERE token = #{token}"})
     AgentEnrollmentToken findByToken(@Param("token") String token);
+
+    /** MeinConnect fork: look a token up by id (admin status check). */
+    @Select({"SELECT * FROM agentEnrollmentToken WHERE id = #{id}"})
+    AgentEnrollmentToken findById(@Param("id") Integer id);
+
+    /** MeinConnect fork: remember which device consumed the token. */
+    @Update({"UPDATE agentEnrollmentToken SET mcDeviceNumber = #{deviceNumber}, mcEnrolledAt = #{at} WHERE id = #{id}"})
+    void markEnrolled(@Param("id") Integer id, @Param("deviceNumber") String deviceNumber, @Param("at") long at);
 
     /**
      * Atomically claim the single-use token: exactly one concurrent enroll gets rowcount 1; the

@@ -56,4 +56,14 @@ public class AgentEnrollmentTokenDAO {
     public void release(Integer id) {
         mapper.release(id);
     }
+
+    /** MeinConnect fork: token by id, or null. */
+    public AgentEnrollmentToken findById(Integer id) {
+        return id == null ? null : mapper.findById(id);
+    }
+
+    /** MeinConnect fork: record the device that consumed the token. */
+    public void markEnrolled(Integer id, String deviceNumber) {
+        mapper.markEnrolled(id, deviceNumber, System.currentTimeMillis());
+    }
 }

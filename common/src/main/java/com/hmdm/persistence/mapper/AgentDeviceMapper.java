@@ -89,7 +89,7 @@ public interface AgentDeviceMapper {
     List<String> listDeviceNumbersByConfigurationId(@Param("configurationId") int configurationId);
 
     /** One row per device of the customer with its configuration + last applied revision (LEFT JOIN: never-reported devices included). */
-    @Select({"SELECT d.number AS deviceNumber, d.configurationId AS configurationId, d.agentCapabilities AS capabilitiesJson, " +
+    @Select({"SELECT d.id AS deviceId, d.number AS deviceNumber, d.configurationId AS configurationId, d.agentCapabilities AS capabilitiesJson, " +
             "s.appliedConfigRevision AS appliedConfigRevision " +
             "FROM devices d LEFT JOIN device_state s ON s.deviceNumber = d.number " +
             "WHERE d.customerId = #{customerId} AND d.configurationId IS NOT NULL"})

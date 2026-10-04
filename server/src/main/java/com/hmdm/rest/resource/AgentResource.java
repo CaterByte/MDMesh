@@ -170,6 +170,13 @@ public class AgentResource {
             }
             commandDAO.touchLastUpdate(deviceId);
 
+            // MeinConnect fork: name the device from the token and remember which device used it, so
+            // MeinConnect can apply the customer/site chosen when the QR code was created.
+            if (token.getMcDescription() != null && !token.getMcDescription().trim().isEmpty()) {
+                unsecureDAO.mcSetDeviceDescription(device.getId(), token.getMcDescription().trim());
+            }
+            tokenDAO.markEnrolled(token.getId(), deviceId);
+
             String configurationName = null;
             if (device.getConfigurationId() != null) {
                 Configuration configuration = unsecureDAO.getConfigurationById(device.getConfigurationId());
