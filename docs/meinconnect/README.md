@@ -112,7 +112,7 @@ Wichtig für die MeinConnect-App: Android zeigt Firebase-Pushes **nicht** von se
 
 **MDM-Nachrichten** (`device.alert`) erscheinen ab v1.1.3 zusätzlich als Karte über dem aktuellen Bildschirm und auf dem Sperrbildschirm, nicht nur als Benachrichtigung.
 
-**Sperrbildschirm:** Ab v1.1.3 ist *Lock screen* bei *Default* an. Nach „Sperren“ oder der Ein/Aus-Taste erscheint dann der normale Sperrbildschirm (ohne PIN zum Wischen, mit PIN entsprechend). Bisher hat Android im Kiosk den Sperrbildschirm komplett übersprungen. *Off* stellt das alte Verhalten wieder her.
+**Sperrbildschirm:** Ab v1.1.3 ist *Lock screen* bei *Default* an. Nach „Sperren“ oder der Ein/Aus-Taste erscheint dann der normale Sperrbildschirm (ohne PIN zum Wischen, mit PIN entsprechend). Bisher hat Android im Kiosk den Sperrbildschirm komplett übersprungen. *Off* stellt das alte Verhalten wieder her. Ab v1.1.4 schaltet der Agent dabei eine Displaysperre „Keine“ auf „Wischen“ um (`setKeyguardDisabled(false)`), denn sonst gibt es gar keinen Sperrbildschirm, den der Kiosk durchlassen könnte. Eine PIN oder ein Muster bleibt unverändert.
 
 **Hintergrund:** Das Feld *Background image URL* wird ab v1.1.3 zusätzlich als System-Hintergrund für Startbildschirm **und** Sperrbildschirm gesetzt (einmal pro Bild). Ein fertiger MeinConnect-Hintergrund liegt in MeinConnect unter `public/logo/mdm-wallpaper.jpg` (`https://meinconnect.app/logo/mdm-wallpaper.jpg`) (1080 × 2400, hell — passt zum Standard-Theme mit dunkler Schrift). Bei dunklen Hintergründen *Background color* dunkel setzen, sonst ist die Uhr schlecht lesbar.
 

@@ -40,6 +40,7 @@ class LockTaskKioskController(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 dpm.setLockTaskFeatures(admin, features)
             }
+            ensureLockScreen(features)
 
             // Claim HOME so pressing home returns to the kiosk launcher.
             val homeFilter = IntentFilter(android.content.Intent.ACTION_MAIN).apply {
@@ -82,6 +83,17 @@ class LockTaskKioskController(
         } catch (t: Throwable) {
             emptyList()
         }
+    }
+
+    /**
+     * MeinConnect fork: LOCK_TASK_FEATURE_KEYGUARD only lets an existing lock screen through. A device whose screen
+     * lock is "None" (common after Device-Owner provisioning) still wakes straight into the kiosk. Re-enabling the
+     * keyguard as Device Owner turns "None" into "Swipe"; a PIN or pattern the user set stays untouched. Best effort:
+     * a refusal never fails the kiosk.
+     */
+    private fun ensureLockScreen(features: Int) {
+        if (features and DevicePolicyManager.LOCK_TASK_FEATURE_KEYGUARD == 0) return
+        runCatching { dpm.setKeyguardDisabled(admin, false) }
     }
 
     /** Run [block]; convert success to [KioskResult.Ok] and any throwable to [KioskResult.Failed]. */
