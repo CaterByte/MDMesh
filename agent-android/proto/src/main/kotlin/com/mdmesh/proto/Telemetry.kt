@@ -10,6 +10,8 @@ data class TelemetrySnapshot(
     val hardware: HardwareInfo? = null,
     val identity: IdentityInfo? = null,
     val security: SecurityPosture? = null,
+    /** MeinConnect fork: system-update and kiosk diagnostics. */
+    val system: SystemStatus? = null,
 )
 
 @Serializable
@@ -87,4 +89,25 @@ data class SecurityPosture(
     val unknownSourcesAllowed: Boolean,
     val patchAgeDays: Int?,
     val isDeviceOwner: Boolean,
+)
+
+/**
+ * MeinConnect fork: what the admin needs to diagnose updates and kiosk notifications remotely.
+ *
+ * @property updatePolicy active OTA policy (`automatic` | `windowed` | `postpone`), null = none set.
+ * @property pendingUpdateSince epoch millis since an OTA update has been waiting; null = none known. Only filled
+ *   when the manufacturer's updater reports to Android (most current devices do).
+ * @property pendingUpdateIsSecurityPatch true/false when the updater says so, null when unknown.
+ * @property lockTaskActive the device is in lock task (kiosk) right now.
+ * @property lockTaskFeatures effective `LOCK_TASK_FEATURE_*` names (`home`, `notifications`, `keyguard`, …).
+ * @property notificationsAllowed the agent may post notifications (MDM messages).
+ */
+@Serializable
+data class SystemStatus(
+    val updatePolicy: String? = null,
+    val pendingUpdateSince: Long? = null,
+    val pendingUpdateIsSecurityPatch: Boolean? = null,
+    val lockTaskActive: Boolean = false,
+    val lockTaskFeatures: List<String> = emptyList(),
+    val notificationsAllowed: Boolean = true,
 )

@@ -32,6 +32,7 @@ class CheckInCoordinatorTest {
         pending: PendingResults,
         identityId: String = "dev-1",
         syncStatus: SyncStatus = SyncStatus(),
+        profile: com.mdmesh.core.store.DeviceProfileSink = com.mdmesh.core.store.DeviceProfileSink { _, _ -> },
     ): CheckInCoordinator {
         val identity = FakeIdentity(initialId = identityId, initialSecret = "sek-1")
         val eventSink = object : com.mdmesh.core.telemetry.EventSink {
@@ -51,6 +52,7 @@ class CheckInCoordinatorTest {
             telemetrySource = { null },
             eventSink = eventSink,
             syncStatus = syncStatus,
+            profile = profile,
         )
     }
 
@@ -137,5 +139,15 @@ class CheckInCoordinatorTest {
         api.checkInThrows = null
         coordinator.runOnce()
         assertNull(syncStatus.lastError.value)
+    }
+
+    @Test
+    fun `hands the device name from the check-in response to the profile`() = runTest {
+        val api = FakeMdmApi().apply {
+            checkInResponse = ResponseEnvelope(status = "OK", data = AgentCheckInResponse(deviceName = "Küche Nord"))
+        }
+        val seen = mutableListOf<String?>()
+        coordinator(api, PendingResults(), profile = { name, _ -> seen += name }).runOnce()
+        assertEquals(listOf<String?>("Küche Nord"), seen)
     }
 }

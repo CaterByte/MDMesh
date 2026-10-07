@@ -187,4 +187,60 @@ public class DesiredConfigBuilderTest {
         assertNull(d.getKiosk());
         assertEquals(DesiredConfigBuilder.build(c, Collections.<Application>emptyList()).getRevision(), d.getRevision());
     }
+
+    // --- MeinConnect fork: kiosk defaults, system updates, configuration name ---------------------------
+
+    @Test
+    public void notifications_and_keyguard_default_to_on_but_respect_an_explicit_off() {
+        DesiredConfig d = DesiredConfigBuilder.build(kioskConfig(), Arrays.asList(app(5, 505, "com.acme.pos", 1)));
+        assertEquals(Boolean.TRUE, d.getKiosk().getFeatures().getNotifications());
+        assertEquals(Boolean.TRUE, d.getKiosk().getFeatures().getKeyguard());
+        assertNull("other features keep the framework default", d.getKiosk().getFeatures().getSystemInfo());
+
+        Configuration off = kioskConfig();
+        off.setKioskNotifications(false); off.setKioskKeyguard(false);
+        DesiredConfig o = DesiredConfigBuilder.build(off, Arrays.asList(app(5, 505, "com.acme.pos", 1)));
+        assertEquals(Boolean.FALSE, o.getKiosk().getFeatures().getNotifications());
+        assertEquals(Boolean.FALSE, o.getKiosk().getFeatures().getKeyguard());
+    }
+
+    @Test
+    public void system_update_policy_follows_the_console_type() {
+        Configuration c = kioskConfig();
+        assertNull("Default = unmanaged", DesiredConfigBuilder.build(c, Collections.<Application>emptyList()).getSystemUpdate());
+        assertFalse(DesiredConfigBuilder.canonicalJson(DesiredConfigBuilder.build(c, Collections.<Application>emptyList())).contains("systemUpdate"));
+
+        c.setSystemUpdateType(1);
+        assertEquals("automatic", DesiredConfigBuilder.build(c, Collections.<Application>emptyList()).getSystemUpdate().getType());
+
+        c.setSystemUpdateType(3);
+        assertEquals("postpone", DesiredConfigBuilder.build(c, Collections.<Application>emptyList()).getSystemUpdate().getType());
+
+        c.setSystemUpdateType(2); c.setSystemUpdateFrom("23:30"); c.setSystemUpdateTo("4:15");
+        DesiredConfig w = DesiredConfigBuilder.build(c, Collections.<Application>emptyList());
+        assertEquals("windowed", w.getSystemUpdate().getType());
+        assertEquals(Integer.valueOf(23 * 60 + 30), w.getSystemUpdate().getWindowStart());
+        assertEquals(Integer.valueOf(4 * 60 + 15), w.getSystemUpdate().getWindowEnd());
+    }
+
+    @Test
+    public void scheduled_system_updates_without_a_valid_window_stay_unmanaged() {
+        Configuration c = kioskConfig();
+        c.setSystemUpdateType(2);
+        c.setSystemUpdateFrom("02:00"); c.setSystemUpdateTo(null);
+        assertNull(DesiredConfigBuilder.build(c, Collections.<Application>emptyList()).getSystemUpdate());
+        c.setSystemUpdateTo("25:00");
+        assertNull(DesiredConfigBuilder.build(c, Collections.<Application>emptyList()).getSystemUpdate());
+        c.setSystemUpdateTo("02:00");
+        assertNull("empty window", DesiredConfigBuilder.build(c, Collections.<Application>emptyList()).getSystemUpdate());
+    }
+
+    @Test
+    public void configuration_name_is_carried_and_blank_is_dropped() {
+        Configuration c = kioskConfig();
+        c.setName("  Waage Kiosk ");
+        assertEquals("Waage Kiosk", DesiredConfigBuilder.build(c, Collections.<Application>emptyList()).getConfigurationName());
+        c.setName(" ");
+        assertNull(DesiredConfigBuilder.build(c, Collections.<Application>emptyList()).getConfigurationName());
+    }
 }

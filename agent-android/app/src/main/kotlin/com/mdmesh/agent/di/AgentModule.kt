@@ -43,6 +43,10 @@ import com.mdmesh.core.install.InstallManager
 import com.mdmesh.core.state.DeviceStateCollector
 import com.mdmesh.core.state.DeviceStateSource
 import com.mdmesh.core.store.ConfigStateStore
+import com.mdmesh.core.store.DeviceProfileSink
+import com.mdmesh.core.store.DeviceProfileStore
+import com.mdmesh.core.config.DpmSystemUpdatePolicy
+import com.mdmesh.core.telemetry.SystemStatusCollector
 import com.mdmesh.core.store.DataStoreKioskStateStore
 import com.mdmesh.core.store.KioskStateStore
 import com.mdmesh.core.store.SharedPrefsConfigStateStore
@@ -147,6 +151,15 @@ object AgentModule {
     @Provides
     fun provideCapabilitySource(collector: CapabilityCollector): CapabilitySource = collector
 
+    /** MeinConnect fork: device name + last check-in for the kiosk info sheet. */
+    @Provides
+    @Singleton
+    fun provideDeviceProfileStore(@ApplicationContext context: Context): DeviceProfileStore =
+        DeviceProfileStore(context)
+
+    @Provides
+    fun provideDeviceProfileSink(store: DeviceProfileStore): DeviceProfileSink = store
+
     /** Stable, permission-free device id for enrollment de-duplication. */
     @Provides
     fun provideHardwareIdSource(collector: HardwareIdCollector): HardwareIdSource = collector
@@ -167,11 +180,13 @@ object AgentModule {
         identity: IdentityCollector,
         dynamic: DynamicStateCollector,
         security: SecurityCollector,
+        system: SystemStatusCollector,
     ): TelemetrySource = TelemetryAssembler(
         hardware = { deviceInfo.collect() },
         identity = { identity.collect() },
         dynamic = { dynamic.collect() },
         security = { security.collect() },
+        system = { system.collect() },
     )
 
     /**
@@ -340,7 +355,8 @@ object AgentModule {
         kiosk: KioskApplier,
         location: LocationModeStore,
         store: ConfigStateStore,
-    ): ConfigApplier = ConfigApplier(toggles, kiosk, location::set, store)
+        handle: DpmHandle,
+    ): ConfigApplier = ConfigApplier(toggles, kiosk, location::set, store, DpmSystemUpdatePolicy(handle))
 
     @Provides
     @IntoSet

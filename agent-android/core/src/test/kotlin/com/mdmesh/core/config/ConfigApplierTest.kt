@@ -12,6 +12,7 @@ import com.mdmesh.policy.TogglePolicy
 import com.mdmesh.proto.ConfigApplyPayload
 import com.mdmesh.proto.ConfigLocation
 import com.mdmesh.proto.ConfigOutcome
+import com.mdmesh.proto.ConfigSystemUpdate
 import com.mdmesh.proto.KioskApplyPayload
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
@@ -100,5 +101,45 @@ class ConfigApplierTest {
         val r = ConfigApplier(mapOf("wifi" to wifi), kiosk(FakeController()), {}, store).reapplyPersisted()
         assertEquals("p1", r?.revision); assertEquals(true, wifi.last)
         assertNull(ConfigApplier(emptyMap(), kiosk(FakeController()), {}, InMemoryConfigStateStore()).reapplyPersisted())
+    }
+
+    // --- MeinConnect fork: system update policy -------------------------------------------------------------
+
+    private class FakeUpdates(private val outcome: PolicyOutcome = PolicyOutcome.Applied) : SystemUpdatePolicySink {
+        val calls = mutableListOf<ConfigSystemUpdate?>()
+        override fun apply(update: ConfigSystemUpdate?): PolicyOutcome { calls += update; return outcome }
+    }
+
+    @Test fun `system update policy is applied and cleared only after the config managed it`() = runTest {
+        val updates = FakeUpdates(); val store = InMemoryConfigStateStore()
+        val a = ConfigApplier(emptyMap(), kiosk(FakeController()), {}, store, updates)
+        val r0 = a.apply(ConfigApplyPayload(revision = "u0"))
+        assertTrue("never managed -> untouched", updates.calls.isEmpty())
+        assertFalse(r0.outcomes.containsKey(ConfigApplier.KEY_SYSTEM_UPDATE))
+
+        val auto = ConfigSystemUpdate(ConfigSystemUpdate.AUTOMATIC)
+        val r1 = a.apply(ConfigApplyPayload(revision = "u1", systemUpdate = auto))
+        assertEquals(listOf<ConfigSystemUpdate?>(auto), updates.calls)
+        assertEquals(ConfigOutcome.APPLIED, r1.outcomes[ConfigApplier.KEY_SYSTEM_UPDATE])
+
+        a.apply(ConfigApplyPayload(revision = "u2"))
+        assertEquals("admin switched back to Default -> policy cleared", listOf(auto, null), updates.calls)
+        a.apply(ConfigApplyPayload(revision = "u3"))
+        assertEquals("cleared once, not on every apply", 2, updates.calls.size)
+    }
+
+    @Test fun `a failed system update policy blocks persistence`() = runTest {
+        val store = InMemoryConfigStateStore()
+        val r = ConfigApplier(emptyMap(), kiosk(FakeController()), {}, store, FakeUpdates(PolicyOutcome.Failed("dpm")))
+            .apply(ConfigApplyPayload(revision = "u9", systemUpdate = ConfigSystemUpdate(ConfigSystemUpdate.POSTPONE)))
+        assertEquals("failed: dpm", r.outcomes[ConfigApplier.KEY_SYSTEM_UPDATE])
+        assertNull(store.revision())
+    }
+
+    @Test fun `update windows must lie inside the day and not be empty`() {
+        fun w(a: Int?, b: Int?) =
+            DpmSystemUpdatePolicy.validWindow(ConfigSystemUpdate(ConfigSystemUpdate.WINDOWED, a, b))
+        assertTrue(w(120, 240)); assertTrue("wraps past midnight", w(23 * 60, 60))
+        assertFalse(w(120, 120)); assertFalse(w(null, 240)); assertFalse(w(0, 24 * 60))
     }
 }

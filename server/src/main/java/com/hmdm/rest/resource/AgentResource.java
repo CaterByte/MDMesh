@@ -379,7 +379,11 @@ public class AgentResource {
             }
         }
 
-        return Response.OK(new AgentCheckInResponse(commands));
+        AgentCheckInResponse body = new AgentCheckInResponse(commands);
+        // MeinConnect fork: the name given in the console / MeinConnect, for the agent's device info sheet.
+        String name = device.getDescription();
+        body.setDeviceName(name == null || name.trim().isEmpty() ? null : name.trim());
+        return Response.OK(body);
     }
 
     /**

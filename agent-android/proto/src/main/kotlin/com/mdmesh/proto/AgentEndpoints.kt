@@ -77,4 +77,6 @@ data class AgentDeviceStateDto(
 data class AgentCheckInResponse(
     val protocolVersion: String = ProtocolJson.PROTOCOL_VERSION,
     val commands: List<CommandEnvelope> = emptyList(),
+    /** MeinConnect fork: the name given to this device in the console / MeinConnect; null when unnamed. */
+    val deviceName: String? = null,
 )

@@ -42,6 +42,9 @@ public class AgentCheckInResponse {
 
     private List<AgentCommand> commands;
 
+    /** MeinConnect fork: the device's name (console description), shown in the agent's device info. */
+    private String deviceName;
+
     public AgentCheckInResponse() {
     }
 

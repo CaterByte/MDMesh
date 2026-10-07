@@ -27,6 +27,8 @@ class ConfigApplier(
     private val kiosk: KioskApplier,
     private val setLocationMode: (String) -> Unit,
     private val store: ConfigStateStore,
+    /** MeinConnect fork: OTA update policy; null = this build does not manage system updates. */
+    private val systemUpdates: SystemUpdatePolicySink? = null,
 ) {
     private val mutex = Mutex()
 
@@ -41,7 +43,9 @@ class ConfigApplier(
                 is PolicyOutcome.Failed -> ConfigOutcome.failed(o.reason)
             }
         }
+        val previous = store.load()
         applyKiosk(doc)?.let { outcomes["kiosk"] = it }
+        applySystemUpdate(doc, previous)?.let { outcomes[KEY_SYSTEM_UPDATE] = it }
         doc.location?.let { loc ->
             outcomes["location"] = runCatching { setLocationMode(loc.mode); ConfigOutcome.APPLIED }
                 .getOrElse { ConfigOutcome.failed(it.message ?: "location mode") }
@@ -49,6 +53,24 @@ class ConfigApplier(
         val result = ConfigApplyResult(doc.revision, outcomes)
         if (succeeded(result)) store.save(doc)
         return result
+    }
+
+    /**
+     * MeinConnect fork: absent = "not managed" — clear only a policy the last applied document set, so a device whose
+     * owner set no policy in the console is never touched.
+     */
+    private fun applySystemUpdate(doc: ConfigApplyPayload, previous: ConfigApplyPayload?): String? {
+        val sink = systemUpdates
+        val managed = doc.systemUpdate != null || previous?.systemUpdate != null
+        return if (sink == null || !managed) {
+            null
+        } else {
+            when (val o = sink.apply(doc.systemUpdate)) {
+                PolicyOutcome.Applied -> ConfigOutcome.APPLIED
+                PolicyOutcome.Unsupported -> ConfigOutcome.UNSUPPORTED
+                is PolicyOutcome.Failed -> ConfigOutcome.failed(o.reason)
+            }
+        }
     }
 
     /** @return the kiosk outcome, or null when nothing was asserted or exited (the key is then omitted). */
@@ -74,6 +96,8 @@ class ConfigApplier(
     suspend fun reapplyPersisted(): ConfigApplyResult? = mutex.withLock { store.load()?.let { applyLocked(it) } }
 
     companion object {
+        const val KEY_SYSTEM_UPDATE = "systemUpdate"
+
         fun succeeded(r: ConfigApplyResult): Boolean = r.outcomes.values.none(ConfigOutcome::isFailed)
     }
 }

@@ -46,6 +46,7 @@ class HomeScreen(
     private val parts: BrandParts,
     private val onLaunch: (String) -> Unit,
     private val onQuick: (QuickTab) -> Unit,
+    private val onInfo: (() -> Unit)? = null,
 ) {
     private val activity = parts.activity
     private val theme = parts.theme
@@ -87,7 +88,14 @@ class HomeScreen(
         val time = clock("HH:mm", "h:mm", TIME_SP, theme.text, BrandFonts.semibold(activity)).apply {
             letterSpacing = TIME_TRACKING
         }
-        addView(time, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = kit.dp(TIME_GAP_DP) })
+        // The (i) sits on the clock row, right — clear of the invisible 7-tap exit corner above it.
+        val timeRow = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(time, LinearLayout.LayoutParams(0, WRAP, 1f))
+            onInfo?.let { addView(infoButton(it), LinearLayout.LayoutParams(kit.dp(INFO_DP), kit.dp(INFO_DP))) }
+        }
+        addView(timeRow, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = kit.dp(TIME_GAP_DP) })
         theme.title?.let { title ->
             val kicker = kit.text(
                 activity.getString(R.string.kiosk_location).uppercase(Locale.getDefault()),
@@ -102,6 +110,15 @@ class HomeScreen(
             }
             addView(headline, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = kit.dp(HEADLINE_GAP_DP) })
         }
+    }
+
+    /** Round (i) button opening the device info sheet. */
+    private fun infoButton(onClick: () -> Unit): View = parts.glyph(R.drawable.ic_mc_info, theme.text).apply {
+        val pad = kit.dp(INFO_PAD_DP)
+        setPadding(pad, pad, pad, pad)
+        background = kit.pressable(kit.rounded(theme.card, PILL_DP, theme.line), PILL_DP)
+        contentDescription = activity.getString(R.string.info_title)
+        setOnClickListener { onClick() }
     }
 
     /** The main app: big icon + name, and a full-width gradient "Open" button. */
@@ -265,6 +282,9 @@ class HomeScreen(
         const val TIME_SP = 64f
         const val TIME_TRACKING = -0.03f
         const val TIME_GAP_DP = 14
+        const val INFO_DP = 44
+        const val INFO_PAD_DP = 11
+        const val PILL_DP = 999
         const val KICKER_SP = 11f
         const val KICKER_TRACKING = 0.18f
         const val KICKER_GAP_DP = 14

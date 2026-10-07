@@ -34,4 +34,21 @@ class TelemetryAssemblerTest {
         val a = TelemetryAssembler({ error("x") }, { error("x") }, { dyn() }, { sec })
         assertEquals(sec, a.snapshot().security)
     }
+
+    @Test fun systemStatusIsOptional() {
+        val sys = com.mdmesh.proto.SystemStatus(updatePolicy = "automatic", lockTaskFeatures = listOf("home"))
+        fun with(system: () -> com.mdmesh.proto.SystemStatus?) =
+            TelemetryAssembler({ error("x") }, { error("x") }, { dyn() }, { error("x") }, system).snapshot().system
+        assertNull(TelemetryAssembler({ error("x") }, { error("x") }, { dyn() }, { error("x") }).snapshot().system)
+        assertEquals(sys, with { sys })
+        assertNull(with { error("dpm") })
+    }
+
+    @Test fun lockTaskFeatureNamesAreStable() {
+        val mask = android.app.admin.DevicePolicyManager.LOCK_TASK_FEATURE_HOME or
+            android.app.admin.DevicePolicyManager.LOCK_TASK_FEATURE_NOTIFICATIONS or
+            android.app.admin.DevicePolicyManager.LOCK_TASK_FEATURE_KEYGUARD
+        assertEquals(listOf("notifications", "home", "keyguard"), SystemStatusCollector.featureNames(mask))
+        assertEquals(emptyList<String>(), SystemStatusCollector.featureNames(0))
+    }
 }

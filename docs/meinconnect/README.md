@@ -106,9 +106,21 @@ Das Branding stellst du in der Konsole ein: **Configurations → Konfiguration**
 
 **Schnelleinstellungen** (Gruppe Kiosk): *Quick setting: Wi-Fi*, *Quick setting: brightness* und *Quick setting: volume*. Was eingeschaltet ist, erscheint unten auf dem Home-Screen als Kachel und öffnet ein Fenster: WLAN wählen und Passwort eingeben, Helligkeit oder Lautstärke (Medien + Benachrichtigungen) per Regler. Die Android-Einstellungen selbst bleiben gesperrt. Für die WLAN-Liste muss die Standortfunktion des Geräts an sein. Firmen-WLAN (802.1X/EAP) lässt sich dort nicht einrichten.
 
-**Benachrichtigungen im Kiosk:** *Notifications* auf *On* stellen. Der Agent schaltet dann *Home* automatisch mit ein (Android verlangt das, sonst schlägt der ganze Kiosk fehl) und erteilt den freigegebenen Apps ab Android 13 die Benachrichtigungs-Berechtigung. Meldungen erscheinen dann als Banner, und die Benachrichtigungsleiste lässt sich herunterziehen. Androids Schnelleinstellungen bleiben dabei gesperrt.
+**Benachrichtigungen im Kiosk:** Ab v1.1.3 sind sie bei *Notifications = Default* an; nur *Off* schaltet sie ab. Der Agent schaltet *Home* automatisch mit ein (Android verlangt das, sonst schlägt der ganze Kiosk fehl) und erteilt den freigegebenen Apps und sich selbst ab Android 13 die Benachrichtigungs-Berechtigung. Meldungen erscheinen als Banner, und die Benachrichtigungsleiste lässt sich herunterziehen. Androids Schnelleinstellungen bleiben dabei gesperrt. Welche Kiosk-Funktionen auf dem Gerät wirklich aktiv sind, meldet der Agent in der Telemetrie (`system.lockTaskFeatures`).
 
-**Branding pro Gerät (MeinConnect):** Ab v1.2 kann jedes Gerät Titel und Logo der Konfiguration überschreiben (Tabelle `mcDeviceBranding`). MeinConnect setzt das automatisch aus dem White-Label des zugeordneten Kunden, so teilen sich viele Kunden eine Konfiguration wie „Waage Kiosk“. Ein überschriebenes Gerät hat dadurch eine eigene Revision; die Sync-Übersicht der Konsole rechnet das mit ein. API: `GET`/`PUT /rest/private/agent/v1/devices/{nummer}/branding` mit `{"title": …, "logoUrl": "https://…"}`, beide leer = zurück zur Konfiguration.
+Wichtig für die MeinConnect-App: Android zeigt Firebase-Pushes **nicht** von selbst an, solange die App im Vordergrund ist — und im Kiosk ist sie das praktisch immer. Die App muss Nachrichten im Vordergrund selbst als lokale Benachrichtigung ausgeben (`FirebaseMessaging.onMessage` → `flutter_local_notifications`, Kanal mit hoher Wichtigkeit).
+
+**MDM-Nachrichten** (`device.alert`) erscheinen ab v1.1.3 zusätzlich als Karte über dem aktuellen Bildschirm und auf dem Sperrbildschirm, nicht nur als Benachrichtigung.
+
+**Sperrbildschirm:** Ab v1.1.3 ist *Lock screen* bei *Default* an. Nach „Sperren“ oder der Ein/Aus-Taste erscheint dann der normale Sperrbildschirm (ohne PIN zum Wischen, mit PIN entsprechend). Bisher hat Android im Kiosk den Sperrbildschirm komplett übersprungen. *Off* stellt das alte Verhalten wieder her.
+
+**Hintergrund:** Das Feld *Background image URL* wird ab v1.1.3 zusätzlich als System-Hintergrund für Startbildschirm **und** Sperrbildschirm gesetzt (einmal pro Bild). Ein fertiger MeinConnect-Hintergrund liegt in MeinConnect unter `public/logo/mdm-wallpaper.jpg` (`https://meinconnect.app/logo/mdm-wallpaper.jpg`) (1080 × 2400, hell — passt zum Standard-Theme mit dunkler Schrift). Bei dunklen Hintergründen *Background color* dunkel setzen, sonst ist die Uhr schlecht lesbar.
+
+**Systemupdates:** Gruppe *Updates* → *System updates*. *Immediately* installiert Hersteller-Updates, sobald sie da sind (das Gerät startet dann von selbst neu), *Scheduled* nur im täglichen Zeitfenster *System update from/to* (z. B. 02:00–04:00, darf über Mitternacht gehen), *Postponed* hält Updates 30 Tage zurück (Android-Grenze; Sicherheitsupdates können trotzdem kommen), *Default* lässt alles beim Nutzer. Das MDM steuert **wann** installiert wird, nicht **welche** Version — die kommt vom Hersteller. Ein wartendes Update meldet der Agent in der Telemetrie (`system.pendingUpdateSince`), sofern der Updater des Herstellers es an Android meldet.
+
+**Geräteinfo:** Das (i) rechts neben der Uhr öffnet die Geräteinfo: Name aus der Konsole/MeinConnect, Kunde, Konfiguration, Geräte-ID, Modell, Android/Patch, Seriennummer, IMEI, Verbindung, Agent-Version, letzter Abgleich, Update-Status. Werte gedrückt halten kopiert sie.
+
+**Branding pro Gerät (MeinConnect):** Ab v1.1.2 kann jedes Gerät Titel und Logo der Konfiguration überschreiben (Tabelle `mcDeviceBranding`). MeinConnect setzt das automatisch aus dem White-Label des zugeordneten Kunden, so teilen sich viele Kunden eine Konfiguration wie „Waage Kiosk“. Ein überschriebenes Gerät hat dadurch eine eigene Revision; die Sync-Übersicht der Konsole rechnet das mit ein. API: `GET`/`PUT /rest/private/agent/v1/devices/{nummer}/branding` mit `{"title": …, "logoUrl": "https://…"}`, beide leer = zurück zur Konfiguration.
 
 **Den Kiosk verlassen:**
 
@@ -143,14 +155,15 @@ In beiden Fällen wird das *Admin password* der Konfiguration abgefragt.
 | Pipeline und Installer | `.github/workflows/release.yml`, `setup.sh`, `install/install-native.sh`, `quickstart.sh`, `docker-compose.release.yml`, `release/minisign.pub` |
 | Theme-Vertrag | `proto/payloads/config-apply.schema.json`, `agent-android/proto/…/KioskCommand.kt`, `common/…/DesiredKioskTheme.java`, `common/…/DesiredConfigBuilder.java` (+ Test) |
 | Datenbank | `Configuration.java`, `ConfigurationMapper.java/.xml`, Liquibase-Changesets `mc-26.10.01-kiosk-branding`, `mc-26.10.04-kiosk-quick-settings` und `mc-26.10.05-device-branding-enroll-meta` |
-| MeinConnect-Anbindung (v1.2) | `McDeviceBranding*.java` (Domain, Mapper, DAO), `DesiredConfigBuilder.build(cfg, apps, branding)` (+ Test), `ConfigReconciler`, `AgentAdminResource` (`/devices/{n}/branding`, `/token/{id}`, `mcDescription` beim Token), `AgentResource.enroll` (Gerätename aus dem Token, `mcDeviceNumber`) |
+| MeinConnect-Anbindung (v1.1.2) | `McDeviceBranding*.java` (Domain, Mapper, DAO), `DesiredConfigBuilder.build(cfg, apps, branding)` (+ Test), `ConfigReconciler`, `AgentAdminResource` (`/devices/{n}/branding`, `/token/{id}`, `mcDescription` beim Token), `AgentResource.enroll` (Gerätename aus dem Token, `mcDeviceNumber`) |
 | Konsole | `web/src/data/configFields.ts`, `web/src/pages/ConfigurationsPage.tsx` (Reset für Farbfelder) |
 | Agent-Oberfläche | `agent-android/kiosk/…/brand/KioskBrand.kt`, `BrandGradient.kt` (+ Test), `agent-android/app/…/brand/*` (HomeScreen, QuickSheet, QuickSlider, WifiControl, LightAndSound, BrandParts …), `KioskLauncherActivity.kt`, `MainActivity.kt`, `core/…/AlertNotifier.kt`, `AndroidManifest.xml` (CHANGE_WIFI_STATE) |
 | Kiosk-Verhalten | `agent-android/kiosk/…/KioskFeatures.kt` (+ Test): Notifications/Recents ziehen Home mit; Liquibase `mc-26.10.04-kiosk-quick-settings`; `DesiredKiosk.quickSettings` |
+| v1.1.3 | `DesiredConfigBuilder` (Notifications/Lock screen standardmäßig an, `systemUpdate`, `configurationName`; Golden-Revision neu), `DesiredSystemUpdate.java`, `AgentCheckInResponse.deviceName`; Agent: `ConfigApplier` + `DpmSystemUpdatePolicy`, `SystemStatusCollector` (Telemetrie `system`), `DeviceProfileStore`, `brand/WifiPanel`/`WifiListView`/`WifiPasswordForm`/`SheetFrame`/`InfoSheet`/`DeviceInfoReader`/`WallpaperSync`, `AlertActivity` |
 | Ressourcen | `res/font/poppins_*.ttf` (OFL, siehe `agent-android/third_party/poppins/OFL.txt`), `res/drawable-nodpi/mc_*.png`, `res/mipmap-*/ic_launcher_foreground.png`, `res/values(-de)/strings.xml`, `core/src/main/res/values(-de)/strings.xml` |
 
 ## Noch offen
 
 - Den Kiosk auf einem echten Gerät ansehen. Die Oberfläche ist programmatisch gebaut und lokal nur gegen die Android-Schnittstellen typgeprüft. Den vollständigen Build und Lint übernimmt die CI.
 - Das App-Icon ist eine Ableitung aus der Wortmarke mit dem Signaturbalken. Eine eigene Bildmarke fehlt noch.
-- MeinConnect-Anbindung: umgesetzt im MeinConnect-Repo (`Modules/Mdm`, `docs/konzept-mdm-anbindung.md`). Ab v1.2 mit Geräte-Branding und Vorab-Zuordnung beim Einrichten.
+- MeinConnect-Anbindung: umgesetzt im MeinConnect-Repo (`Modules/Mdm`, `docs/konzept-mdm-anbindung.md`). Ab v1.1.2 mit Geräte-Branding und Vorab-Zuordnung beim Einrichten.

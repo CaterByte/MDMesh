@@ -29,8 +29,12 @@ class KioskScreens(private val parts: BrandParts) {
     private val kit = parts.kit
 
     /** The launcher home; [onQuick] opens a quick-settings panel. */
-    fun launcher(model: HomeModel, onLaunch: (String) -> Unit, onQuick: (QuickTab) -> Unit): FrameLayout =
-        HomeScreen(parts, onLaunch, onQuick).build(model)
+    fun launcher(
+        model: HomeModel,
+        onLaunch: (String) -> Unit,
+        onQuick: (QuickTab) -> Unit,
+        onInfo: (() -> Unit)? = null,
+    ): FrameLayout = HomeScreen(parts, onLaunch, onQuick, onInfo).build(model)
 
     /** Centred logo screen used for the splash, the idle "managed device" screen and crash recovery. */
     fun status(title: String?, body: String?, progress: Boolean = false, alert: Boolean = false): FrameLayout {

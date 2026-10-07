@@ -4,6 +4,7 @@ import com.mdmesh.proto.DynamicState
 import com.mdmesh.proto.HardwareInfo
 import com.mdmesh.proto.IdentityInfo
 import com.mdmesh.proto.SecurityPosture
+import com.mdmesh.proto.SystemStatus
 import com.mdmesh.proto.TelemetrySnapshot
 
 /**
@@ -16,11 +17,13 @@ class TelemetryAssembler(
     private val identity: () -> IdentityInfo,
     private val dynamic: () -> DynamicState,
     private val security: () -> SecurityPosture,
+    private val system: () -> SystemStatus? = { null },
 ) : TelemetrySource {
     override fun snapshot(): TelemetrySnapshot = TelemetrySnapshot(
         dynamic = dynamic(),
         hardware = runCatching { hardware() }.getOrNull(),
         identity = runCatching { identity() }.getOrNull(),
         security = runCatching { security() }.getOrNull(),
+        system = runCatching { system() }.getOrNull(),
     )
 }

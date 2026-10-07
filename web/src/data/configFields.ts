@@ -61,9 +61,9 @@ export const CONFIG_FIELDS: FieldDef[] = [
   { key: 'kioskExit', label: 'Kiosk exit button', type: 'tri', group: 'Kiosk', enforced: true, help: 'Show a button to leave kiosk mode.' },
   { key: 'kioskHome', label: 'Home button', type: 'tri', group: 'Kiosk', enforced: true, help: 'Allow the Home button while in kiosk.' },
   { key: 'kioskRecents', label: 'Recents button', type: 'tri', group: 'Kiosk', enforced: true, help: 'Allow the Recent-apps button while in kiosk.' },
-  { key: 'kioskNotifications', label: 'Notifications', type: 'tri', group: 'Kiosk', enforced: true, help: 'Show notifications (banners + shade) while in kiosk. Android requires the Home button for this; the MeinConnect agent switches it on automatically and grants kiosk apps the notification permission.' },
+  { key: 'kioskNotifications', label: 'Notifications', type: 'tri', group: 'Kiosk', enforced: true, help: 'Show notifications (banners + shade) while in kiosk. Default = on (MeinConnect). Android requires the Home button for this; the agent switches it on automatically and grants kiosk apps the notification permission.' },
   { key: 'kioskSystemInfo', label: 'System info', type: 'tri', group: 'Kiosk', enforced: true, help: 'Show the status/system-info bar while in kiosk.' },
-  { key: 'kioskKeyguard', label: 'Lock screen', type: 'tri', group: 'Kiosk', enforced: true, help: 'Allow the keyguard / lock screen while in kiosk.' },
+  { key: 'kioskKeyguard', label: 'Lock screen', type: 'tri', group: 'Kiosk', enforced: true, help: 'Show the lock screen while in kiosk (power button, Lock command). Default = on (MeinConnect); Off = the device wakes straight into the kiosk.' },
   { key: 'kioskLockButtons', label: 'Lock hardware buttons', type: 'tri', group: 'Kiosk', enforced: true, help: 'Disable power/volume buttons while in kiosk.' },
   { key: 'kioskScreenOn', label: 'Keep screen on', type: 'tri', group: 'Kiosk', help: 'Force the screen to stay awake while in kiosk.' },
   { key: 'showWifi', label: 'Show Wi-Fi on error', type: 'tri', group: 'Kiosk', help: 'Surface Wi-Fi settings if the device loses connectivity in kiosk.' },
@@ -137,11 +137,11 @@ export const CONFIG_FIELDS: FieldDef[] = [
   { key: 'displayStatus', label: 'Show status bar', type: 'switch', group: 'Display', help: 'Show device status (battery, time) in the launcher.' },
 
   // ── Updates ───────────────────────────────────────────────────────────-──
-  { key: 'systemUpdateType', label: 'System updates', type: 'enum', group: 'Updates', help: 'When Android OS updates install.', options: [
+  { key: 'systemUpdateType', label: 'System updates', type: 'enum', group: 'Updates', enforced: true, help: 'When Android OS updates from the manufacturer install. Immediately = as soon as offered (reboots on its own); Scheduled = only in the daily window below; Postponed = held for 30 days; Default = the user decides.', options: [
     { value: 0, label: 'Default' }, { value: 1, label: 'Immediately' }, { value: 2, label: 'Scheduled' }, { value: 3, label: 'Postponed' },
   ] },
-  { key: 'systemUpdateFrom', label: 'System update from', type: 'time', group: 'Updates', help: 'Start of the system-update window (HH:MM, when Scheduled).' },
-  { key: 'systemUpdateTo', label: 'System update to', type: 'time', group: 'Updates', help: 'End of the system-update window (HH:MM, when Scheduled).' },
+  { key: 'systemUpdateFrom', label: 'System update from', type: 'time', group: 'Updates', enforced: true, help: 'Start of the system-update window (HH:MM, when Scheduled).' },
+  { key: 'systemUpdateTo', label: 'System update to', type: 'time', group: 'Updates', enforced: true, help: 'End of the system-update window (HH:MM, when Scheduled).' },
   { key: 'scheduleAppUpdate', label: 'Schedule app updates', type: 'switch', group: 'Updates', help: 'Only install app updates within a time window.' },
   { key: 'appUpdateFrom', label: 'App update from', type: 'time', group: 'Updates', help: 'Start of the app-update window (HH:MM).' },
   { key: 'appUpdateTo', label: 'App update to', type: 'time', group: 'Updates', help: 'End of the app-update window (HH:MM).' },

@@ -27,6 +27,8 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- MeinConnect fork: kiosk Wi-Fi quick setting (connect as Device Owner). -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <!-- MeinConnect fork: kiosk background image as home + lock screen wallpaper. -->
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- Report location while parked/backgrounded (Android 10+); DO auto-grants it at provisioning. -->
@@ -80,6 +82,22 @@
             android:excludeFromRecents="true"
             android:stateNotNeeded="true"
             android:lockTaskMode="if_whitelisted" />
+
+        <!-- MeinConnect fork: MDM message (device.alert) as a card over the current screen and the lock
+             screen. Own task affinity, so closing it returns to whatever was in front. -->
+        <activity
+            android:name=".AlertActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.mdmesh.agent.alert"
+            android:lockTaskMode="if_whitelisted"
+            android:theme="@style/Theme.MdmAgent.Alert">
+            <intent-filter>
+                <action android:name="com.mdmesh.agent.action.SHOW_ALERT" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
 
         <!-- HOME claim, disabled by default. kiosk.enter enables it + pins it as the persistent
              preferred HOME; kiosk.exit disables it so HOME falls back to the OEM launcher. -->

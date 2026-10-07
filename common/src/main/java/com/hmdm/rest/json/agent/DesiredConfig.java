@@ -46,4 +46,8 @@ public class DesiredConfig {
      */
     private DesiredKiosk kiosk;
     private DesiredLocation location;
+    /** MeinConnect fork: configuration name, shown in the agent's device info. */
+    private String configurationName;
+    /** MeinConnect fork: absent = the configuration does not manage system updates (the agent clears its policy). */
+    private DesiredSystemUpdate systemUpdate;
 }

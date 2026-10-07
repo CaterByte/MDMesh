@@ -5,6 +5,7 @@ import com.mdmesh.core.command.CommandDispatcher
 import com.mdmesh.core.net.MdmApi
 import com.mdmesh.core.state.DeviceStateSource
 import com.mdmesh.core.store.DeviceIdentity
+import com.mdmesh.core.store.DeviceProfileSink
 import com.mdmesh.core.telemetry.EventSink
 import com.mdmesh.core.telemetry.TelemetrySource
 import com.mdmesh.proto.AgentCheckInRequest
@@ -44,6 +45,7 @@ class CheckInCoordinator @Inject constructor(
     private val eventSink: EventSink,
     private val hardwareIdSource: HardwareIdSource = HardwareIdSource { null },
     private val syncStatus: SyncStatus = SyncStatus(),
+    private val profile: DeviceProfileSink = DeviceProfileSink { _, _ -> },
 ) {
 
     private val mutex = Mutex()
@@ -90,6 +92,9 @@ class CheckInCoordinator @Inject constructor(
             eventSink.restore(bufferedEvents)
             throw CheckInException(response.message ?: "check-in rejected")
         }
+
+        // MeinConnect fork: remember the device's name for the kiosk info sheet (never fails the cycle).
+        runCatching { profile.onCheckIn(data.deviceName, System.currentTimeMillis()) }
 
         val results = data.commands.map { dispatcher.dispatch(it) }
         pending.add(results)

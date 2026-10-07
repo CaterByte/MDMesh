@@ -10,6 +10,7 @@ import com.hmdm.rest.json.agent.DesiredKiosk;
 import com.hmdm.rest.json.agent.DesiredKioskFeatures;
 import com.hmdm.rest.json.agent.DesiredKioskTheme;
 import com.hmdm.rest.json.agent.DesiredLocation;
+import com.hmdm.rest.json.agent.DesiredSystemUpdate;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -60,6 +61,8 @@ public final class DesiredConfigBuilder {
         DesiredLocation loc = new DesiredLocation();
         loc.setMode(cfg.getRequestUpdates() == RequestUpdatesType.GPS ? "active" : "passive");
         d.setLocation(loc);
+        d.setConfigurationName(blankToNull(cfg.getName()));
+        d.setSystemUpdate(systemUpdate(cfg));
         d.setRevision(revision(d));
         return d;
     }
@@ -105,8 +108,13 @@ public final class DesiredConfigBuilder {
         k.setAllowedPackages(allowed);
         k.setPinPackage(mainPkg);
         DesiredKioskFeatures f = new DesiredKioskFeatures();
-        f.setHome(cfg.getKioskHome()); f.setRecents(cfg.getKioskRecents()); f.setNotifications(cfg.getKioskNotifications());
-        f.setSystemInfo(cfg.getKioskSystemInfo()); f.setKeyguard(cfg.getKioskKeyguard()); f.setLockButtons(cfg.getKioskLockButtons());
+        f.setHome(cfg.getKioskHome()); f.setRecents(cfg.getKioskRecents());
+        // MeinConnect fork: "Default" (null) means ON for notifications and the lock screen. Without them a kiosk
+        // phone shows no banners, the shade won't open, and the power button wakes straight into the app.
+        f.setNotifications(cfg.getKioskNotifications() == null ? Boolean.TRUE : cfg.getKioskNotifications());
+        f.setSystemInfo(cfg.getKioskSystemInfo());
+        f.setKeyguard(cfg.getKioskKeyguard() == null ? Boolean.TRUE : cfg.getKioskKeyguard());
+        f.setLockButtons(cfg.getKioskLockButtons());
         k.setFeatures(f);
         k.setExitMode(Boolean.TRUE.equals(cfg.getKioskExit()) ? "visible" : "gesture");
         k.setPassword(cfg.getPassword());
@@ -139,6 +147,43 @@ public final class DesiredConfigBuilder {
         if (cfg.isKioskQsBrightness()) qs.add("brightness");
         if (cfg.isKioskQsVolume()) qs.add("volume");
         return qs.isEmpty() ? null : qs;
+    }
+
+    /**
+     * MeinConnect fork: console "System updates" (0 Default, 1 Immediately, 2 Scheduled, 3 Postponed). Default — and
+     * Scheduled without a valid HH:MM window — leaves updates unmanaged (null).
+     */
+    static DesiredSystemUpdate systemUpdate(Configuration cfg) {
+        DesiredSystemUpdate u = new DesiredSystemUpdate();
+        switch (cfg.getSystemUpdateType()) {
+            case 1:
+                u.setType(DesiredSystemUpdate.AUTOMATIC);
+                return u;
+            case 2:
+                Integer from = minutesOfDay(cfg.getSystemUpdateFrom());
+                Integer to = minutesOfDay(cfg.getSystemUpdateTo());
+                if (from == null || to == null || from.equals(to)) return null;
+                u.setType(DesiredSystemUpdate.WINDOWED);
+                u.setWindowStart(from);
+                u.setWindowEnd(to);
+                return u;
+            case 3:
+                u.setType(DesiredSystemUpdate.POSTPONE);
+                return u;
+            default:
+                return null;
+        }
+    }
+
+    /** "HH:MM" (also "H:MM") to minutes after midnight; null when blank or invalid. */
+    static Integer minutesOfDay(String hhmm) {
+        String v = blankToNull(hhmm);
+        if (v == null || !v.matches("\\d{1,2}:\\d{2}")) return null;
+        String[] p = v.split(":");
+        int h = Integer.parseInt(p[0]);
+        int m = Integer.parseInt(p[1]);
+        if (h > 23 || m > 59) return null;
+        return h * 60 + m;
     }
 
     private static String blankToNull(String v) {

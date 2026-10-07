@@ -32,6 +32,16 @@
           "brandBar": {"type":"string", "description":"MeinConnect fork: 'none' or colour stops '#RRGGBB:END%,...' drawn as a gradient"} } }
       }
     },
-    "location": { "type": "object", "properties": { "mode": { "enum": ["passive", "active"] } } }
+    "location": { "type": "object", "properties": { "mode": { "enum": ["passive", "active"] } } },
+    "configurationName": { "type": "string", "description": "MeinConnect fork: configuration name for the agent's device info" },
+    "systemUpdate": {
+      "type": "object",
+      "description": "MeinConnect fork: OTA update policy. Absent = not managed (the agent clears a policy it set earlier).",
+      "properties": {
+        "type": { "enum": ["automatic", "windowed", "postpone"] },
+        "windowStart": { "type": "integer", "minimum": 0, "maximum": 1439, "description": "minutes after local midnight (windowed)" },
+        "windowEnd": { "type": "integer", "minimum": 0, "maximum": 1439, "description": "minutes after local midnight (windowed; may wrap past midnight)" }
+      }
+    }
   }
 }

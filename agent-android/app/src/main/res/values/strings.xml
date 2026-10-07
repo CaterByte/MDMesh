@@ -38,11 +38,70 @@
     <string name="qs_no_networks">No networks found. Is location turned on?</string>
     <string name="qs_password">Password</string>
     <string name="qs_connect">Connect</string>
-    <string name="qs_connecting">Connecting to %1$s…</string>
     <string name="qs_enterprise">Enterprise Wi-Fi can\'t be set up here</string>
     <string name="qs_dark">Dark</string>
     <string name="qs_bright">Bright</string>
     <string name="qs_quiet">Quiet</string>
     <string name="qs_loud">Loud</string>
     <string name="qs_percent">%1$d%%</string>
+
+    <!-- MeinConnect fork: Wi-Fi panel -->
+    <string name="qs_wifi_sub">Choose a network for this device</string>
+    <string name="qs_refresh">Search again</string>
+    <string name="qs_updating">Searching …</string>
+    <string name="qs_updated_at">Updated %1$s</string>
+    <string name="qs_all_networks">All networks</string>
+    <string name="qs_security_wpa2">Secured (WPA2)</string>
+    <string name="qs_security_wpa3">Secured (WPA3)</string>
+    <string name="qs_show_password">Show password</string>
+    <string name="qs_password_hint">At least 8 characters. Saved on this device only.</string>
+    <string name="qs_connecting_short">Connecting</string>
+    <string name="qs_wrong_password">Wrong password. Please check and try again.</string>
+    <string name="qs_connect_failed">Couldn\'t connect. Check the password and signal.</string>
+    <string name="qs_connect_refused">Android refused this network.</string>
+
+    <!-- MeinConnect fork: device info sheet -->
+    <string name="info_title">Device info</string>
+    <string name="info_unnamed">No name yet</string>
+    <string name="info_managed">Managed device</string>
+    <string name="info_refresh">Refresh</string>
+    <string name="info_refreshing">Syncing with the server …</string>
+    <string name="info_copy_hint">Long-press a value to copy it</string>
+    <string name="info_copied">%1$s copied</string>
+    <string name="info_section_device">Device</string>
+    <string name="info_section_hardware">Hardware</string>
+    <string name="info_section_network">Network</string>
+    <string name="info_section_management">Management</string>
+    <string name="info_customer">Customer</string>
+    <string name="info_configuration">Configuration</string>
+    <string name="info_number">Device ID</string>
+    <string name="info_model">Model</string>
+    <string name="info_android">Android</string>
+    <string name="info_patch">Security patch</string>
+    <string name="info_serial">Serial number</string>
+    <string name="info_imei">IMEI</string>
+    <string name="info_phone">Phone number</string>
+    <string name="info_connection">Connection</string>
+    <string name="info_wifi_named">Wi-Fi · %1$s</string>
+    <string name="info_cellular">Mobile data</string>
+    <string name="info_cellular_named">Mobile · %1$s</string>
+    <string name="info_offline">Offline</string>
+    <string name="info_ip">IP address</string>
+    <string name="info_battery">Battery</string>
+    <string name="info_charging">charging</string>
+    <string name="info_agent">Agent version</string>
+    <string name="info_last_sync">Last sync</string>
+    <string name="info_updates">System updates</string>
+    <string name="info_updates_automatic">Install right away</string>
+    <string name="info_updates_windowed">In a time window</string>
+    <string name="info_updates_window">Daily %1$s–%2$s</string>
+    <string name="info_updates_postponed">Postponed (30 days)</string>
+    <string name="info_updates_unmanaged">Not managed</string>
+    <string name="info_pending_update">Update waiting</string>
+    <string name="info_waiting_since">since %1$s</string>
+    <string name="info_security_update">security update</string>
+
+    <!-- MeinConnect fork: MDM message card -->
+    <string name="alert_kicker">Message from your administrator</string>
+    <string name="alert_ok">Got it</string>
 </resources>
