@@ -88,6 +88,15 @@ public class AgentCommandDAO {
         mapper.expireStale(deviceNumber, now - pendingTtlMillis, now - deliveredTtlMillis, now);
     }
 
+    /**
+     * MeinConnect fork: expire commands delivered before the device's last boot (their results died with it).
+     * {@code bootedAt} must be in SERVER time — see AgentResource, which derives it from the reported uptime.
+     * @return how many commands were expired
+     */
+    public int expireDeliveredBefore(String deviceNumber, long bootedAt) {
+        return mapper.expireDeliveredBefore(deviceNumber, bootedAt, System.currentTimeMillis());
+    }
+
     /** Command lifecycle history for a device, newest first, created at/after {@code since}. */
     public List<AgentCommand> listHistory(String deviceNumber, long since, int limit) {
         return mapper.listHistory(deviceNumber, since, limit);

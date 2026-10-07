@@ -82,6 +82,19 @@ public interface AgentCommandMapper {
     void expireStale(@Param("deviceNumber") String deviceNumber, @Param("pendingCutoff") long pendingCutoff,
                      @Param("deliveredCutoff") long deliveredCutoff, @Param("now") long now);
 
+    /**
+     * MeinConnect fork: a command DELIVERED before the agent's process last (re)started can never be acked — the
+     * agent buffers results in memory until the next check-in, and the reboot, crash or self-update dropped them. Without
+     * this the command sits as delivered for the 6 h leash and blocks config reconciliation (and agent rollouts) the
+     * whole time. A late real result still overwrites 'expired' (see markResultWithTime).
+     */
+    @Update({"UPDATE agentCommand SET status = 'expired', completedAt = #{now}, " +
+            "detail = 'agent restarted before reporting a result' " +
+            "WHERE deviceNumber = #{deviceNumber} AND status = 'delivered' " +
+            "AND deliveredAt IS NOT NULL AND deliveredAt < #{bootedAt}"})
+    int expireDeliveredBefore(@Param("deviceNumber") String deviceNumber, @Param("bootedAt") long bootedAt,
+                              @Param("now") long now);
+
     @Select({"SELECT * FROM agentCommand WHERE deviceNumber = #{deviceNumber} AND createdAt >= #{since} " +
             "ORDER BY id DESC LIMIT #{limit}"})
     List<AgentCommand> listHistory(@Param("deviceNumber") String deviceNumber,

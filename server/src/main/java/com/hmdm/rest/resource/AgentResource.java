@@ -348,6 +348,16 @@ public class AgentResource {
         // leash (6 h): the device HAS them — a slow install on metered network must not be
         // expired out from under its own genuine result.
         commandDAO.expireStale(deviceNumber, 60L * 60L * 1000L, 6L * 60L * 60L * 1000L);
+        // MeinConnect fork: commands delivered to an earlier agent process (reboot, crash, self-update) can never
+        // be acked — results are buffered in memory until the next check-in. Expire them now instead of letting them
+        // block config reconciliation and agent rollouts for the 6 h leash. A late genuine result still wins.
+        Long bootedBefore = com.hmdm.util.DeviceBootTime.bootedBefore(request.getTelemetry(), System.currentTimeMillis());
+        if (bootedBefore != null) {
+            int lost = commandDAO.expireDeliveredBefore(deviceNumber, bootedBefore);
+            if (lost > 0) {
+                logger.info("Device {} agent restarted: expired {} command(s) delivered before", deviceNumber, lost);
+            }
+        }
 
         // Gate pending commands by capability-token set membership, reusing the matrix this very
         // request carried (fall back to the stored copy only when the agent omitted it).

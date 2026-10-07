@@ -101,6 +101,9 @@ data class SecurityPosture(
  * @property lockTaskActive the device is in lock task (kiosk) right now.
  * @property lockTaskFeatures effective `LOCK_TASK_FEATURE_*` names (`home`, `notifications`, `keyguard`, …).
  * @property notificationsAllowed the agent may post notifications (MDM messages).
+ * @property processUptimeMs how long the agent process has been running. Results of commands are buffered in
+ *   memory until the next check-in, so the server expires commands delivered to an earlier process (crash,
+ *   self-update, reboot) instead of waiting hours for an ack that can't come.
  */
 @Serializable
 data class SystemStatus(
@@ -110,4 +113,5 @@ data class SystemStatus(
     val lockTaskActive: Boolean = false,
     val lockTaskFeatures: List<String> = emptyList(),
     val notificationsAllowed: Boolean = true,
+    val processUptimeMs: Long? = null,
 )

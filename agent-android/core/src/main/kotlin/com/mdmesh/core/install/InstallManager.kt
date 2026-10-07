@@ -11,6 +11,7 @@ import android.os.Build
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -198,7 +199,11 @@ class InstallManager @Inject constructor(
                 session.commit(resultSender(sessionId).intentSender)
             }
 
-            mapResult(resultBus.await(sessionId))
+            // MeinConnect fork: never wait forever. Commands run one after another inside the check-in cycle, so a
+            // result broadcast that never comes used to stall every later check-in until the device rebooted.
+            val result = withTimeoutOrNull(INSTALL_RESULT_TIMEOUT_MS) { resultBus.await(sessionId) }
+                ?: return@withContext InstallOutcome.Failure(null, "no install result within 10 min")
+            mapResult(result)
         }
 
     /**
@@ -295,3 +300,6 @@ class InstallManager @Inject constructor(
         else -> "STATUS_$status"
     }
 }
+
+/** MeinConnect fork: upper bound for the platform's install/uninstall result broadcast. */
+private const val INSTALL_RESULT_TIMEOUT_MS = 10L * 60L * 1000L

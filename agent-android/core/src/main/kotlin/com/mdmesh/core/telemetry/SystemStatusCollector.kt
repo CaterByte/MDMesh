@@ -6,6 +6,8 @@ import android.app.admin.SystemUpdateInfo
 import android.app.admin.SystemUpdatePolicy
 import android.content.Context
 import android.os.Build
+import android.os.Process
+import android.os.SystemClock
 import androidx.core.app.NotificationManagerCompat
 import com.mdmesh.policy.wifi.DpmHandle
 import com.mdmesh.proto.ConfigSystemUpdate
@@ -37,6 +39,9 @@ class SystemStatusCollector @Inject constructor(
             lockTaskFeatures = lockTaskFeatures(dpm),
             notificationsAllowed = runCatching { NotificationManagerCompat.from(context).areNotificationsEnabled() }
                 .getOrDefault(true),
+            processUptimeMs = runCatching {
+                SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime()
+            }.getOrNull()?.takeIf { it >= 0 },
         )
     }
 
